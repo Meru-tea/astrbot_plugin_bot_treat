@@ -81,7 +81,7 @@ class TreatConfig:
     satiety_threshold: int = 3
     gen_kind: str = "selfie"
     # 默认开：同时传两张参考图并用序数语法逐张指定角色
-    # （第1张=Atri 人设身份图保脸，第2张=用户食物照片仅作 scene 参考）。
+    # （第1张=角色人设身份图保脸，第2张=用户食物照片仅作 scene 参考）。
     # 详见 prompts.REFERENCE_ROLE_SUFFIX 与 README §4.1。
     use_food_as_ref: bool = True
     # 人物身份参考图（本地绝对路径或 URL）；留空 = 自动用陪伴插件配置的人物参考图

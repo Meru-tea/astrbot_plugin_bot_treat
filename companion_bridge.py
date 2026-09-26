@@ -929,7 +929,7 @@ class CompanionBridge:
             local = await self._local_reference(value)
             if local:
                 return local
-        logger.warning("bot_treat: 未能解析出 Atri 人设参考图的本地路径")
+        logger.warning("bot_treat: 未能解析出角色人设参考图的本地路径")
         return ""
 
     @staticmethod

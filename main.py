@@ -1,6 +1,6 @@
-"""投喂亚托莉（astrbot_plugin_bot_treat）
+"""投喂bot（astrbot_plugin_bot_treat）
 
-给 Atri 发一张食物照片并说「投喂」，她会自己判断吃不吃：
+给 Bot 发一张食物照片并说「投喂」，它会结合人设与状态自己判断吃不吃：
   - 吃   -> 生成一张「她正在吃这份食物」的照片发回会话（复用陪伴插件生图链路，selfie 保脸）
   - 不吃 -> 只回一句符合性格的拒绝，不消耗生图配额
 
@@ -189,12 +189,12 @@ def _has_image_hint(event: AstrMessageEvent) -> bool:
 @register(
     PLUGIN_NAME,
     "Meru",
-    "投喂亚托莉：发食物照片给她，按性格与状态自主判断吃不吃，吃则生成进食照片",
+    "投喂bot：发食物照片给 Bot，按人设与当前状态自主判断吃不吃，吃则生成正在吃该食物的照片",
     VERSION,
     "https://github.com/Meru-tea/astrbot_plugin_bot_treat",
 )
 class BotTreatPlugin(Star):
-    """投喂亚托莉：发一张食物照片给我并说「投喂」，我会自己决定吃不吃。
+    """投喂bot：发一张食物照片给我并说「投喂」，我会自己决定吃不吃。
 
     吃就把我吃这份食物的样子发给你；不想吃的话，我会告诉你为什么～
 
@@ -229,7 +229,7 @@ class BotTreatPlugin(Star):
     async def initialize(self):
         cfg = self.cfg()
         logger.info(
-            f"bot_treat: 投喂亚托莉 v{VERSION} 已加载"
+            f"bot_treat: 投喂bot v{VERSION} 已加载"
             f"（数据目录 {self._data_dir}，陪伴插件桥"
             f"{'可用' if self.bridge.available() else '暂不可用（稍后自动重试）'}）"
         )
@@ -297,7 +297,7 @@ class BotTreatPlugin(Star):
             except Exception:
                 pass
         self._photo_holds.clear()
-        logger.info("bot_treat: 投喂亚托莉已卸载")
+        logger.info("bot_treat: 投喂bot已卸载")
 
     # -------------------------------------------------- 出站结果闸门（发送前最后一道）
 
@@ -765,7 +765,7 @@ class BotTreatPlugin(Star):
         # 7) 接受分支：生图
         #
         # 关于参考图（关键，改动前先读 README §4.1 与 prompts.REFERENCE_ROLE_SUFFIX）：
-        #   陪伴插件在「本轮带了显式参考图」时不会再自动追加 Atri 人设图
+        #   陪伴插件在「本轮带了显式参考图」时不会再自动追加人设图
         #   （proactive_message.py 约 16263 行的分支要求 not candidates and not paths）。
         #   所以要让食物照片参与生成，就必须把**人设图也一并传**，并用「第1张/第2张」
         #   序数角色说明逐张指定角色 —— 否则食物图会被默认标成 identity，把脸挤掉。
@@ -784,7 +784,7 @@ class BotTreatPlugin(Star):
                 )
             else:
                 logger.warning(
-                    "bot_treat: use_food_as_ref=true 但未取到 Atri 人设参考图，"
+                    "bot_treat: use_food_as_ref=true 但未取到角色人设参考图，"
                     "本次退回「不传参考图」以保住脸一致（陪伴插件会自动上人设图）"
                 )
 
@@ -810,7 +810,7 @@ class BotTreatPlugin(Star):
         )
         status = str(receipt.get("status") or "").lower()
         generated = bool(receipt.get("generated")) or status in STATUS_OK
-        # reference_roles 是「有没有用上 Atri 身份参考图」的运行时证据，务必记日志
+        # reference_roles 是「有没有用上角色身份参考图」的运行时证据，务必记日志
         roles = receipt.get("reference_roles")
         logger.info(
             f"bot_treat: 生图回执 status={status} generated={generated} "
