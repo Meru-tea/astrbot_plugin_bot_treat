@@ -57,26 +57,18 @@
 
 ## 安装
 
-**方式一：插件市场**（推荐）
-在 AstrBot 的插件管理中搜索本插件并安装。
+在 AstrBot WebUI 里通过网页单独安装。
 
-**方式二：手动安装**
-把插件目录放到 AstrBot 的 `data/plugins/` 下，**目录名保持 `astrbot_plugin_bot_treat`**：
+或手动安装:
 
-```text
-data/plugins/
-└── astrbot_plugin_bot_treat/
-    ├── main.py
-    ├── metadata.yaml
-    ├── _conf_schema.json
-    ├── logo.png
-    └── ...
+```bash
+cd AstrBot/data/plugins
+git clone https://github.com/Meru-tea/astrbot_plugin_bot_treat
 ```
 
-随后重载插件或重启 AstrBot。**无需安装任何第三方依赖**（`requirements.txt` 为空）。
+安装后重启 AstrBot 即可。无需安装任何第三方依赖（`requirements.txt` 为空）。
 
-> 从旧名 `astrbot_plugin_atri_treat` 升级？改名会同步影响配置文件名与插件数据目录，
-> 请先看 [CHANGELOG 的 v0.4.0 迁移说明](CHANGELOG.md)。
+> 从旧名 `astrbot_plugin_atri_treat` 升级的迁移步骤见 [CHANGELOG](CHANGELOG.md) 的 v0.4.0 条目。
 
 ## 快速开始
 
