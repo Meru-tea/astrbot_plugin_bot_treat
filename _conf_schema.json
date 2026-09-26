@@ -1,0 +1,142 @@
+{
+  "enable_feed": {
+    "description": "投喂功能总开关",
+    "type": "bool",
+    "default": true
+  },
+  "enable_private": {
+    "description": "允许私聊投喂",
+    "type": "bool",
+    "default": true
+  },
+  "enable_group": {
+    "description": "允许群聊投喂（需 @ 或唤醒）",
+    "type": "bool",
+    "default": true
+  },
+  "enable_natural_language": {
+    "description": "自然语言通道：直接说「投喂」+图也触发（需带图，只认句首）",
+    "type": "bool",
+    "default": true
+  },
+  "daily_limit": {
+    "description": "每日被「吃下」的次数上限，超出后拒绝",
+    "type": "int",
+    "default": 5
+  },
+  "cooldown_sec": {
+    "description": "两次投喂的最小间隔（秒）",
+    "type": "int",
+    "default": 30
+  },
+  "satiety_threshold": {
+    "description": "饱腹阈值：今日已吃下这么多次后必定拒绝",
+    "type": "int",
+    "default": 3
+  },
+  "gen_kind": {
+    "description": "进食照片的生图类型：selfie 保脸 / edit 以食物图改图 / text2img 纯场景",
+    "type": "string",
+    "options": [
+      "selfie",
+      "edit",
+      "text2img"
+    ],
+    "default": "selfie"
+  },
+  "use_food_as_ref": {
+    "description": "把食物照片作为参考图参与生成（关掉则只用文字描述还原食物）",
+    "type": "bool",
+    "default": true
+  },
+  "persona_reference_image_path": {
+    "description": "人物身份参考图的本地绝对路径或图片 URL（留空=自动使用陪伴插件配置的人物参考图）",
+    "type": "string",
+    "default": ""
+  },
+  "vision_provider_id": {
+    "description": "食物识别用的视觉模型 provider id，留空用 AstrBot 默认",
+    "type": "string",
+    "default": ""
+  },
+  "vision_timeout_sec": {
+    "description": "食物识别超时（秒）",
+    "type": "int",
+    "default": 30
+  },
+  "llm_timeout_sec": {
+    "description": "进食决策（文本模型）超时（秒）",
+    "type": "int",
+    "default": 45
+  },
+  "feed_wait_photo_sec": {
+    "description": "说了「投喂」后等照片的秒数（0=关闭）",
+    "type": "int",
+    "default": 8
+  },
+  "photo_api_base_url": {
+    "description": "仅投喂使用的生图接口地址，留空=沿用陪伴插件配置",
+    "type": "string",
+    "default": ""
+  },
+  "photo_api_key": {
+    "description": "上面自定义接口的密钥",
+    "type": "string",
+    "default": ""
+  },
+  "photo_api_model": {
+    "description": "上面自定义接口的模型名，如 gpt-image-2.5",
+    "type": "string",
+    "default": ""
+  },
+  "photo_api_size": {
+    "description": "上面自定义接口的出图尺寸，如 1024x1024",
+    "type": "string",
+    "default": ""
+  },
+  "photo_api_override_sec": {
+    "description": "自定义接口的覆盖保持秒数",
+    "type": "int",
+    "default": 15
+  },
+  "photo_hold_sec": {
+    "description": "照片先挂起这么多秒等紧随的「投喂」（0=关闭）",
+    "type": "int",
+    "default": 6
+  },
+  "feed_watch_sec": {
+    "description": "投喂回合的回复抑制窗口（秒，0=关闭）",
+    "type": "int",
+    "default": 150
+  },
+  "photo_timeout_sec": {
+    "description": "单次生图超时（秒）。带参考图常需 1–3 分钟，不要调小",
+    "type": "int",
+    "default": 240
+  },
+  "min_image_bytes": {
+    "description": "小于此字节数的图片直接拦下（防表情包误投）",
+    "type": "int",
+    "default": 6144
+  },
+  "image_lookback_sec": {
+    "description": "回看最近收到的图（秒，0=关闭）。照片与文字分两条发时用",
+    "type": "int",
+    "default": 120
+  },
+  "extra_block_keywords": {
+    "description": "额外的拒绝关键词（默认已内置酒精等）",
+    "type": "list",
+    "default": []
+  },
+  "enable_memory_writeback": {
+    "description": "把本次投喂写回陪伴插件的记忆",
+    "type": "bool",
+    "default": true
+  },
+  "dry_run": {
+    "description": "演练模式：照常决策但不出图，只回一条调试文本",
+    "type": "bool",
+    "default": false
+  }
+}

@@ -1,0 +1,17 @@
+# 统一换行：仓库内一律 LF，免疫本机的 core.autocrlf=true
+* text=auto eol=lf
+
+*.py   text eol=lf
+*.md   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.json text eol=lf
+*.txt  text eol=lf
+*.sh   text eol=lf
+
+# 二进制文件不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
