@@ -61,11 +61,11 @@
 在 AstrBot 的插件管理中搜索本插件并安装。
 
 **方式二：手动安装**
-把插件目录放到 AstrBot 的 `data/plugins/` 下，**目录名保持 `astrbot_plugin_atri_treat`**：
+把插件目录放到 AstrBot 的 `data/plugins/` 下，**目录名保持 `astrbot_plugin_bot_treat`**：
 
 ```text
 data/plugins/
-└── astrbot_plugin_atri_treat/
+└── astrbot_plugin_bot_treat/
     ├── main.py
     ├── metadata.yaml
     ├── _conf_schema.json
@@ -194,7 +194,7 @@ data/plugins/
 ## 常见问题
 
 **Q：Bot 一直回「投喂要带图哦」？**
-A：说明它没拿到图。确认是**先发图、再发「投喂」**；图片与文字分两条发送时本插件有 120 秒回看窗口，正常能取到。仍失败请把日志里以 `atri_treat:` 开头的行发出来。
+A：说明它没拿到图。确认是**先发图、再发「投喂」**；图片与文字分两条发送时本插件有 120 秒回看窗口，正常能取到。仍失败请把日志里以 `bot_treat:` 开头的行发出来。
 
 **Q：Bot 说「太饱了」不吃？**
 A：这是设计行为。`satiety_threshold`（默认 3）表示「今日已吃下这么多次就必定拒绝」；距上次投喂太近也会被拒。想连续测试可调高阈值或调大 `daily_limit`。
@@ -224,7 +224,7 @@ A：目前**在 OneBot v11（aiocqhttp / NapCat 等）实测可用**。其他适
 ## 目录结构
 
 ```text
-astrbot_plugin_atri_treat/
+astrbot_plugin_bot_treat/
 ├── main.py               # 插件入口：事件处理、照片挂起、出站结果闸门
 ├── decision.py           # 配置解析、状态机（冷却 / 饱腹 / 跨天）、吃不吃决策
 ├── prompts.py            # 识别提示词、决策提示词、生图提示词、兜底文案

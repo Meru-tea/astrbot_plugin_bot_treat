@@ -1,4 +1,4 @@
-"""投喂亚托莉（astrbot_plugin_atri_treat）
+"""投喂亚托莉（astrbot_plugin_bot_treat）
 
 给 Atri 发一张食物照片并说「投喂」，她会自己判断吃不吃：
   - 吃   -> 生成一张「她正在吃这份食物」的照片发回会话（复用陪伴插件生图链路，selfie 保脸）
@@ -52,12 +52,12 @@ from .decision import (
 )
 from .prompts import FALLBACK_TEXTS, build_eat_prompt
 
-PLUGIN_NAME = "astrbot_plugin_atri_treat"
+PLUGIN_NAME = "astrbot_plugin_bot_treat"
 VERSION = "0.3.1"
 
 # 「本轮出站结果是本插件自己的」标记。投喂窗口内靠它区分「我们的进食图」与
 # 「陪伴插件对照片的迟到点评/表情包」——只放行自己的，其余丢弃。
-ATR_OWN_EXTRA = "atri_treat_own"
+ATR_OWN_EXTRA = "bot_treat_own"
 # 我们自己的结果发出后，窗口再延长多久收口（覆盖她在我们之后才吐出来的回复）
 FEED_WINDOW_TAIL_SEC = 20.0
 
@@ -191,9 +191,9 @@ def _has_image_hint(event: AstrMessageEvent) -> bool:
     "Meru",
     "投喂亚托莉：发食物照片给她，按性格与状态自主判断吃不吃，吃则生成进食照片",
     VERSION,
-    "https://github.com/Meru-tea/astrbot_plugin_atri_treat",
+    "https://github.com/Meru-tea/astrbot_plugin_bot_treat",
 )
-class AtriTreatPlugin(Star):
+class BotTreatPlugin(Star):
     """投喂亚托莉：发一张食物照片给我并说「投喂」，我会自己决定吃不吃。
 
     吃就把我吃这份食物的样子发给你；不想吃的话，我会告诉你为什么～
@@ -211,7 +211,7 @@ class AtriTreatPlugin(Star):
         try:
             os.makedirs(self._data_dir, exist_ok=True)
         except Exception as e:
-            logger.warning(f"atri_treat: 数据目录创建失败: {e}")
+            logger.warning(f"bot_treat: 数据目录创建失败: {e}")
         self.bridge = CompanionBridge(context)
         self._seen: dict[str, float] = {}
         # 会话键 -> 抑制窗口到期时间戳：窗口内只放行本插件自己的出站结果
@@ -229,19 +229,19 @@ class AtriTreatPlugin(Star):
     async def initialize(self):
         cfg = self.cfg()
         logger.info(
-            f"atri_treat: 投喂亚托莉 v{VERSION} 已加载"
+            f"bot_treat: 投喂亚托莉 v{VERSION} 已加载"
             f"（数据目录 {self._data_dir}，陪伴插件桥"
             f"{'可用' if self.bridge.available() else '暂不可用（稍后自动重试）'}）"
         )
         # 参考图策略：use_food_as_ref 时同时传「人设图 + 食物图」并用序数语法分派角色
         # （第1张 identity / 第2张 scene），人设图取不到时自动退回不传参考图。
         logger.info(
-            f"atri_treat: 参考图策略 use_food_as_ref={cfg.use_food_as_ref} "
+            f"bot_treat: 参考图策略 use_food_as_ref={cfg.use_food_as_ref} "
             f"gen_kind={cfg.gen_kind}"
             + ("（食物图将作为第2张 scene 参考参与生成）" if cfg.use_food_as_ref else "（仅用陪伴插件自动人设图）")
         )
         logger.info(
-            f"atri_treat: 唯一回复策略 照片挂起={cfg.photo_hold_sec}s "
+            f"bot_treat: 唯一回复策略 照片挂起={cfg.photo_hold_sec}s "
             f"投喂后等图={cfg.feed_wait_photo_sec}s 抑制窗口={cfg.feed_watch_sec}s "
             f"回看={cfg.image_lookback_sec}s"
         )
@@ -260,32 +260,32 @@ class AtriTreatPlugin(Star):
                 star_handlers_registry,
             )
         except Exception as e:
-            logger.warning(f"atri_treat: 无法自检钩子注册（import 失败）: {_clip(e, 120)}")
+            logger.warning(f"bot_treat: 无法自检钩子注册（import 失败）: {_clip(e, 120)}")
             return
         for label, ev_type in (
             ("出站闸门", getattr(EventType, "OnDecoratingResultEvent", None)),
         ):
             if ev_type is None:
-                logger.warning(f"atri_treat: {label} 自检失败：拿不到事件类型枚举")
+                logger.warning(f"bot_treat: {label} 自检失败：拿不到事件类型枚举")
                 continue
             try:
                 all_h = star_handlers_registry.get_handlers_by_event_type(ev_type)
                 mine = [
                     h
                     for h in all_h
-                    if "atri_treat" in str(getattr(h, "handler_module_path", ""))
+                    if "bot_treat" in str(getattr(h, "handler_module_path", ""))
                 ]
                 logger.info(
-                    f"atri_treat: {label}注册自检 → 本插件={len(mine)} 同类总数={len(all_h)} "
+                    f"bot_treat: {label}注册自检 → 本插件={len(mine)} 同类总数={len(all_h)} "
                     f"名称={[getattr(h, 'handler_name', '?') for h in mine]} "
                     f"优先级={[getattr(h, 'extras_configs', {}).get('priority') for h in mine]}"
                 )
                 if not mine:
                     logger.warning(
-                        f"atri_treat: ⚠️ {label}未注册成功——唯一回复保障将不生效，请立即排查"
+                        f"bot_treat: ⚠️ {label}未注册成功——唯一回复保障将不生效，请立即排查"
                     )
             except Exception as e:
-                logger.warning(f"atri_treat: {label} 自检异常: {_clip(e, 160)}")
+                logger.warning(f"bot_treat: {label} 自检异常: {_clip(e, 160)}")
 
     async def terminate(self):
         save_states(state_path(self._data_dir), self._states)
@@ -297,7 +297,7 @@ class AtriTreatPlugin(Star):
             except Exception:
                 pass
         self._photo_holds.clear()
-        logger.info("atri_treat: 投喂亚托莉已卸载")
+        logger.info("bot_treat: 投喂亚托莉已卸载")
 
     # -------------------------------------------------- 出站结果闸门（发送前最后一道）
 
@@ -327,14 +327,14 @@ class AtriTreatPlugin(Star):
         self._gate_calls += 1
         if self._gate_calls <= 30:
             logger.info(
-                f"atri_treat: 闸门被调用 #{self._gate_calls} key={key} "
+                f"bot_treat: 闸门被调用 #{self._gate_calls} key={key} "
                 f"私聊={_is_private_event(event)} own={own} 含图={_has_image_hint(event)}"
             )
 
         # 诊断：私聊出站结果每次记一行（低频），用于确认闸门到底有没有被调用
         if _is_private_event(event):
             logger.info(
-                f"atri_treat: 闸门 key={key} own={own} 窗口剩余={max(0.0, until - now):.0f}s "
+                f"bot_treat: 闸门 key={key} own={own} 窗口剩余={max(0.0, until - now):.0f}s "
                 f"含图={_has_image_hint(event)} "
                 f"照片事件={_is_plain_photo_event(event, str(getattr(event, 'message_str', '') or ''))} "
                 f"文本={_clip(getattr(event, 'message_str', ''), 20)!r} "
@@ -350,7 +350,7 @@ class AtriTreatPlugin(Star):
         # 2) 投喂窗口内：丢弃她的迟到点评 / 反应表情包
         if until > now:
             logger.info(
-                f"atri_treat: 抑制投喂窗口内的出站消息 key={key} 组件={_component_names(event)}"
+                f"bot_treat: 抑制投喂窗口内的出站消息 key={key} 组件={_component_names(event)}"
             )
             try:
                 event.clear_result()
@@ -382,7 +382,7 @@ class AtriTreatPlugin(Star):
             if self._photo_holds.get(key) is holder:
                 self._photo_holds.pop(key, None)
         if signalled:
-            logger.info(f"atri_treat: 照片后紧跟投喂，丢弃照片那条的即时回复 key={key}")
+            logger.info(f"bot_treat: 照片后紧跟投喂，丢弃照片那条的即时回复 key={key}")
             try:
                 event.clear_result()
                 event.stop_event()
@@ -433,7 +433,7 @@ class AtriTreatPlugin(Star):
         try:
             paths = await self.bridge.persist_images(event, user_id)
         except Exception as e:
-            logger.debug(f"atri_treat: 照片挂起前落盘失败: {_clip(e, 160)}")
+            logger.debug(f"bot_treat: 照片挂起前落盘失败: {_clip(e, 160)}")
             paths = []
         holder = asyncio.Event()
         self._photo_holds[key] = holder
@@ -452,7 +452,7 @@ class AtriTreatPlugin(Star):
                 self._photo_holds.pop(key, None)
         if signalled:
             logger.info(
-                f"atri_treat: 照片后紧跟投喂 → handler 层压掉照片那条"
+                f"bot_treat: 照片后紧跟投喂 → handler 层压掉照片那条"
                 f"（她的防抖缓冲/即时回复都不会产生）key={key}"
             )
             try:
@@ -461,7 +461,7 @@ class AtriTreatPlugin(Star):
             except Exception:
                 pass
         else:
-            logger.debug(f"atri_treat: 照片后无投喂，放行她的正常回复 key={key}")
+            logger.debug(f"bot_treat: 照片后无投喂，放行她的正常回复 key={key}")
             self._held_photos.pop(key, None)
 
     def _open_window(self, key: str, cfg: TreatConfig) -> None:
@@ -509,7 +509,7 @@ class AtriTreatPlugin(Star):
             except Exception:
                 got = []
             if got:
-                logger.info(f"atri_treat: 等到了照片 {len(got)} 张（先投喂、后发图）")
+                logger.info(f"bot_treat: 等到了照片 {len(got)} 张（先投喂、后发图）")
                 return got
         return []
 
@@ -521,7 +521,7 @@ class AtriTreatPlugin(Star):
             async for result in self._handle(event):
                 yield result
         except Exception as e:  # 任何未预期异常都不该让消息静默丢失
-            logger.warning(f"atri_treat: 处理投喂异常: {_clip(e, 300)}")
+            logger.warning(f"bot_treat: 处理投喂异常: {_clip(e, 300)}")
             try:
                 yield event.plain_result(FALLBACK_TEXTS["bridge_down"])
             except Exception:
@@ -538,7 +538,7 @@ class AtriTreatPlugin(Star):
         if not START_RE.match(text):
             if _is_private_event(event) and _has_image_hint(event):
                 logger.info(
-                    f"atri_treat: 看到私聊照片消息（无触发词）组件={_component_names(event)}"
+                    f"bot_treat: 看到私聊照片消息（无触发词）组件={_component_names(event)}"
                 )
                 await self._hold_photo_event(event, cfg)
             return
@@ -590,12 +590,12 @@ class AtriTreatPlugin(Star):
                     float(cfg.image_lookback_sec),
                 )
             except Exception as e:
-                logger.debug(f"atri_treat: 回看最近图片失败: {_clip(e, 160)}")
+                logger.debug(f"bot_treat: 回看最近图片失败: {_clip(e, 160)}")
                 lookback = []
 
         # 触发命中后打一条诊断日志（低频，用于排查"为什么不触发/为什么说没图"）
         logger.info(
-            f"atri_treat: 触发命中 user={user_id or raw_sender} text={_clip(text, 40)!r} "
+            f"bot_treat: 触发命中 user={user_id or raw_sender} text={_clip(text, 40)!r} "
             f"slash={slash} 消息含图迹象={hint} 回看={len(lookback)} "
             f"组件={_component_names(event)}"
         )
@@ -685,29 +685,29 @@ class AtriTreatPlugin(Star):
                     timeout=float(cfg.vision_timeout_sec) + 15.0,
                 )
             except asyncio.TimeoutError:
-                logger.warning(f"atri_treat: 取图超时 user={user_id}")
+                logger.warning(f"bot_treat: 取图超时 user={user_id}")
                 paths = []
             if paths:
-                logger.info(f"atri_treat: 取图 {len(paths)} 张（本轮消息/引用消息）")
+                logger.info(f"bot_treat: 取图 {len(paths)} 张（本轮消息/引用消息）")
         if not paths:
             paths = [p for p in (lookback or []) if os.path.isfile(p)]
             if paths:
-                logger.info(f"atri_treat: 取图 {len(paths)} 张（回看最近收到的图）")
+                logger.info(f"bot_treat: 取图 {len(paths)} 张（回看最近收到的图）")
         if from_hold:
-            logger.info(f"atri_treat: 取图 {len(paths)} 张（照片挂起时预先落盘）")
+            logger.info(f"bot_treat: 取图 {len(paths)} 张（照片挂起时预先落盘）")
         if not paths:
-            logger.info(f"atri_treat: 无可用图片 user={user_id}")
+            logger.info(f"bot_treat: 无可用图片 user={user_id}")
             yield event.plain_result(FALLBACK_TEXTS["no_image"])
             return
 
         # 2) 安全硬闸（纯代码）
         blocked = precheck_images(paths, cfg.min_image_bytes)
         if blocked:
-            logger.info(f"atri_treat: 硬闸拦截({blocked}) user={user_id}")
+            logger.info(f"bot_treat: 硬闸拦截({blocked}) user={user_id}")
             yield event.plain_result(FALLBACK_TEXTS.get(blocked, FALLBACK_TEXTS["non_food"]))
             return
         if keyword_blocked(text, cfg.extra_block_keywords):
-            logger.info(f"atri_treat: 关键词硬闸拦截 user={user_id}")
+            logger.info(f"bot_treat: 关键词硬闸拦截 user={user_id}")
             yield event.plain_result(FALLBACK_TEXTS["blocked_keyword"])
             return
 
@@ -724,7 +724,7 @@ class AtriTreatPlugin(Star):
             prune_states(self._states, today)
             note_feed(self._states, user_id, today, accepted=False)
             self._persist()
-            logger.info(f"atri_treat: 非食物/危险物({food.danger_text()}) user={user_id}")
+            logger.info(f"bot_treat: 非食物/危险物({food.danger_text()}) user={user_id}")
             yield event.plain_result(self._non_food_text(food))
             return
 
@@ -744,7 +744,7 @@ class AtriTreatPlugin(Star):
             forced,
         )
         logger.info(
-            f"atri_treat: 决策 user={user_id} food={food.name} conf={food.confidence:.2f} "
+            f"bot_treat: 决策 user={user_id} food={food.name} conf={food.confidence:.2f} "
             f"decision={decision.decision} forced={forced or '-'} llm_failed={decision.llm_failed} "
             f"reason={_clip(decision.reason, 40)}"
         )
@@ -779,12 +779,12 @@ class AtriTreatPlugin(Star):
                 reference_paths = [persona_path, *paths][:2]
                 with_food_ref = len(reference_paths) >= 2
                 logger.info(
-                    f"atri_treat: 参考图 第1张=人设({_clip(persona_path, 80)}) "
+                    f"bot_treat: 参考图 第1张=人设({_clip(persona_path, 80)}) "
                     f"第2张=食物({_clip(paths[0], 80)})"
                 )
             else:
                 logger.warning(
-                    "atri_treat: use_food_as_ref=true 但未取到 Atri 人设参考图，"
+                    "bot_treat: use_food_as_ref=true 但未取到 Atri 人设参考图，"
                     "本次退回「不传参考图」以保住脸一致（陪伴插件会自动上人设图）"
                 )
 
@@ -813,7 +813,7 @@ class AtriTreatPlugin(Star):
         # reference_roles 是「有没有用上 Atri 身份参考图」的运行时证据，务必记日志
         roles = receipt.get("reference_roles")
         logger.info(
-            f"atri_treat: 生图回执 status={status} generated={generated} "
+            f"bot_treat: 生图回执 status={status} generated={generated} "
             f"reference_roles={roles} food={food.name} kind={cfg.gen_kind} "
             f"use_food_as_ref={cfg.use_food_as_ref}"
         )
@@ -823,7 +823,7 @@ class AtriTreatPlugin(Star):
 
         if cfg.dry_run:
             logger.info(
-                f"atri_treat: [dry-run] food={food.name} status={status} "
+                f"bot_treat: [dry-run] food={food.name} status={status} "
                 f"roles={roles} receipt={_clip(receipt, 400)}"
             )
             yield event.plain_result(
@@ -849,7 +849,7 @@ class AtriTreatPlugin(Star):
             text_out = FALLBACK_TEXTS["quota_exhausted"]
         else:
             text_out = FALLBACK_TEXTS["gen_failed"]
-        logger.info(f"atri_treat: 生图未成功 status={status} detail={_clip(receipt.get('message'), 200)}")
+        logger.info(f"bot_treat: 生图未成功 status={status} detail={_clip(receipt.get('message'), 200)}")
         yield event.plain_result(text_out)
 
     # -------------------------------------------------- 文案

@@ -1,4 +1,4 @@
-"""陪伴插件能力桥（astrbot_plugin_atri_treat）。
+"""陪伴插件能力桥（astrbot_plugin_bot_treat）。
 
 与 astrbot_plugin_idea_forge/companion_bridge.py 同款防御式写法：
 不 import 陪伴插件任何内部模块、不修改其任何文件，全部经 getattr 探测 +
@@ -33,7 +33,7 @@ PLUGIN_INSTANCE_CACHE_SEC = 15.0
 PERSONA_KEY = "persona_conversation_voice_prompt"
 REPLY_STYLE_KEY = "reply_style_prompt"
 # 参考图暂存子目录（建在陪伴插件 data_dir 内，否则会被它的路径白名单拒绝）
-REF_STAGING_SUBDIR = "atri_treat_refs"
+REF_STAGING_SUBDIR = "bot_treat_refs"
 # 生图接口临时覆盖：plugin 实例 -> 真正的原始端点队列（用于嵌套覆盖时正确还原）
 _ENDPOINT_ORIGINALS: dict[int, list] = {}
 
@@ -107,7 +107,7 @@ class CompanionBridge:
             if meta is not None and getattr(meta, "activated", False):
                 plugin = getattr(meta, "star_cls", None)
         except Exception as e:
-            logger.debug(f"atri_treat: 发现陪伴插件失败: {e}")
+            logger.debug(f"bot_treat: 发现陪伴插件失败: {e}")
             plugin = None
         self._plugin = plugin
         return plugin
@@ -205,7 +205,7 @@ class CompanionBridge:
             try:
                 _add_many(await _acall(fn, event, user_id))
             except Exception as e:
-                logger.debug(f"atri_treat: 落盘管道跳过: {_clip(e, 160)}")
+                logger.debug(f"bot_treat: 落盘管道跳过: {_clip(e, 160)}")
 
         # 2) 延迟图源
         if not found:
@@ -221,7 +221,7 @@ class CompanionBridge:
                 try:
                     _add_many(await _acall(fn, event, user_id))
                 except Exception as e:
-                    logger.debug(f"atri_treat: 本轮图源解析跳过: {_clip(e, 160)}")
+                    logger.debug(f"bot_treat: 本轮图源解析跳过: {_clip(e, 160)}")
 
         # 4) 引用图缓存（同步）
         if not found:
@@ -230,7 +230,7 @@ class CompanionBridge:
                 try:
                     _add_many(await _acall(fn, event))
                 except Exception as e:
-                    logger.debug(f"atri_treat: 引用图缓存跳过: {_clip(e, 160)}")
+                    logger.debug(f"bot_treat: 引用图缓存跳过: {_clip(e, 160)}")
 
         # 5) 引用图事件解析（会走平台接口取被引用消息）
         if not found:
@@ -239,7 +239,7 @@ class CompanionBridge:
                 try:
                     _add_many(await _acall(fn, event))
                 except Exception as e:
-                    logger.debug(f"atri_treat: 引用图解析跳过: {_clip(e, 160)}")
+                    logger.debug(f"bot_treat: 引用图解析跳过: {_clip(e, 160)}")
 
         # 6) 自行遍历消息链（含引用 chain）
         _add_many(self._component_images(event))
@@ -255,7 +255,7 @@ class CompanionBridge:
                 paths.append(local)
         if raw and not paths:
             logger.info(
-                f"atri_treat: 发现 {len(raw)} 个图片源但均无法本地化，"
+                f"bot_treat: 发现 {len(raw)} 个图片源但均无法本地化，"
                 f"首个={_clip(raw[0], 120)}"
             )
         return paths[:3]
@@ -295,7 +295,7 @@ class CompanionBridge:
                 fh.write(data)
             return target
         except Exception as e:
-            logger.debug(f"atri_treat: aiohttp 下载失败，改走 urllib: {e}")
+            logger.debug(f"bot_treat: aiohttp 下载失败，改走 urllib: {e}")
         try:
             import asyncio
             import urllib.request
@@ -312,7 +312,7 @@ class CompanionBridge:
                 fh.write(data)
             return target
         except Exception as e:
-            logger.warning(f"atri_treat: 图片下载失败: {e}")
+            logger.warning(f"bot_treat: 图片下载失败: {e}")
             return ""
 
     def _reference_staging_dir(self) -> str:
@@ -322,7 +322,7 @@ class CompanionBridge:
         if data_dir and os.path.isdir(data_dir):
             return os.path.join(data_dir, REF_STAGING_SUBDIR)
         # 兜底：陪伴插件数据目录不可用时只能落自己这里（随后会被它拒，至少不炸）
-        logger.warning("atri_treat: 陪伴插件数据目录不可用，参考图暂存退化为本插件目录")
+        logger.warning("bot_treat: 陪伴插件数据目录不可用，参考图暂存退化为本插件目录")
         return os.path.join(self._cache_dir(), "treat_inbound")
 
     def _ensure_inside_companion_data_dir(self, plugin, path: str, stem: str = "ref") -> str:
@@ -355,7 +355,7 @@ class CompanionBridge:
         try:
             shutil.copy2(real, target)
         except Exception as e:
-            logger.warning(f"atri_treat: 复制参考图到陪伴插件数据目录失败: {_clip(e, 160)}")
+            logger.warning(f"bot_treat: 复制参考图到陪伴插件数据目录失败: {_clip(e, 160)}")
             return ""
         return target
 
@@ -395,7 +395,7 @@ class CompanionBridge:
         try:
             from astrbot.api.star import StarTools
 
-            return str(StarTools.get_data_dir("astrbot_plugin_atri_treat"))
+            return str(StarTools.get_data_dir("astrbot_plugin_bot_treat"))
         except Exception:
             return os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -465,7 +465,7 @@ class CompanionBridge:
                 if text:
                     return text
         if last_error:
-            logger.warning(f"atri_treat: 视觉识别全部 provider 失败: {_clip(last_error, 200)}")
+            logger.warning(f"bot_treat: 视觉识别全部 provider 失败: {_clip(last_error, 200)}")
         return None
 
     @staticmethod
@@ -537,9 +537,9 @@ class CompanionBridge:
                         if text:
                             return str(text).strip()
                     except Exception as e:
-                        logger.warning(f"atri_treat: 陪伴插件 LLM 调用失败(精简): {_clip(e, 200)}")
+                        logger.warning(f"bot_treat: 陪伴插件 LLM 调用失败(精简): {_clip(e, 200)}")
                 except Exception as e:
-                    logger.warning(f"atri_treat: 陪伴插件 LLM 调用失败: {_clip(e, 200)}")
+                    logger.warning(f"bot_treat: 陪伴插件 LLM 调用失败: {_clip(e, 200)}")
         try:
             import asyncio
 
@@ -553,7 +553,7 @@ class CompanionBridge:
                 if text:
                     return str(text).strip()
         except Exception as e:
-            logger.warning(f"atri_treat: 兜底 LLM 调用失败: {_clip(e, 200)}")
+            logger.warning(f"bot_treat: 兜底 LLM 调用失败: {_clip(e, 200)}")
         return None
 
     # -------------------------------------------------- 生图接口地址临时覆盖
@@ -604,7 +604,7 @@ class CompanionBridge:
             plugin.external_image_api_endpoints = items
             return {"plugin": plugin, "original": true_original, "patched": items}
         except Exception as e:
-            logger.warning(f"atri_treat: 生图地址覆盖准备失败: {_clip(e, 200)}")
+            logger.warning(f"bot_treat: 生图地址覆盖准备失败: {_clip(e, 200)}")
             return None
 
     @staticmethod
@@ -621,7 +621,7 @@ class CompanionBridge:
                 plugin.external_image_api_endpoints = snapshot.get("original")
                 _ENDPOINT_ORIGINALS.pop(id(plugin), None)
         except Exception as e:
-            logger.warning(f"atri_treat: 生图地址还原失败: {_clip(e, 200)}")
+            logger.warning(f"bot_treat: 生图地址还原失败: {_clip(e, 200)}")
 
     # -------------------------------------------------- 生图
 
@@ -664,7 +664,7 @@ class CompanionBridge:
             if snapshot is not None:
                 patched = (snapshot.get("patched") or [{}])[0]
                 logger.info(
-                    f"atri_treat: 本次生图临时使用自定义接口 "
+                    f"bot_treat: 本次生图临时使用自定义接口 "
                     f"base={_clip(patched.get('base_url'), 90)} model={patched.get('model')!r} "
                     f"size={patched.get('size')!r}（{float(api_override_sec):.0f}s 后自动还原）"
                 )
@@ -728,19 +728,19 @@ class CompanionBridge:
 
                 raw = await asyncio.wait_for(fn(**kwargs), timeout=max(30.0, float(timeout)))
             except TypeError as e:
-                logger.debug(f"atri_treat: {name} 签名不匹配，试下一个入口: {_clip(e, 160)}")
+                logger.debug(f"bot_treat: {name} 签名不匹配，试下一个入口: {_clip(e, 160)}")
                 continue
             except asyncio.TimeoutError:
                 # 生图（尤其带参考图的在线 API）耗时可达 1-3 分钟，超时属于可预期的失败
                 logger.warning(
-                    f"atri_treat: {name} 生图超时（>{float(timeout):.0f}s）——"
+                    f"bot_treat: {name} 生图超时（>{float(timeout):.0f}s）——"
                     f"可上调配置 photo_timeout_sec 后重试"
                 )
                 return {"status": "timeout", "generated": False, "sent": False, "message": "generation timeout"}
             except Exception as e:
                 # 必须带上异常类型：asyncio.TimeoutError 等 str() 为空，只打 message 会得到空白行
                 logger.warning(
-                    f"atri_treat: {name} 调用异常({type(e).__name__}): {_clip(e, 200) or '(无消息)'}"
+                    f"bot_treat: {name} 调用异常({type(e).__name__}): {_clip(e, 200) or '(无消息)'}"
                 )
                 return {
                     "status": "error",
@@ -869,15 +869,15 @@ class CompanionBridge:
             if local:
                 staged = self._ensure_inside_companion_data_dir(plugin, local, stem="persona")
                 if staged:
-                    logger.info(f"atri_treat: 人设参考图使用配置指定的图 → {_clip(staged, 110)}")
+                    logger.info(f"bot_treat: 人设参考图使用配置指定的图 → {_clip(staged, 110)}")
                     return staged
                 logger.warning(
-                    "atri_treat: 配置的人设参考图无法放入陪伴插件数据目录，"
+                    "bot_treat: 配置的人设参考图无法放入陪伴插件数据目录，"
                     "已回退为自动解析（该图不会被使用）"
                 )
             else:
                 logger.warning(
-                    f"atri_treat: 配置的人设参考图不可用（既不是可读的本地文件也不是可下载的 URL）："
+                    f"bot_treat: 配置的人设参考图不可用（既不是可读的本地文件也不是可下载的 URL）："
                     f"{_clip(want, 120)}"
                 )
 
@@ -889,7 +889,7 @@ class CompanionBridge:
             try:
                 candidates.append(str(await _acall(fn) or "").strip())
             except Exception as e:
-                logger.debug(f"atri_treat: 人设图异步解析器失败: {_clip(e, 160)}")
+                logger.debug(f"bot_treat: 人设图异步解析器失败: {_clip(e, 160)}")
         # 2) 同步 getter
         fn = getattr(plugin, "_photo_persona_reference_image_path", None)
         if callable(fn):
@@ -929,7 +929,7 @@ class CompanionBridge:
             local = await self._local_reference(value)
             if local:
                 return local
-        logger.warning("atri_treat: 未能解析出 Atri 人设参考图的本地路径")
+        logger.warning("bot_treat: 未能解析出 Atri 人设参考图的本地路径")
         return ""
 
     @staticmethod
@@ -970,9 +970,9 @@ class CompanionBridge:
         recorder = getattr(bridge, "record_persona_life", None) if bridge is not None else None
         if not callable(recorder):
             return False
-        sid = (session_id or "atri_treat")[:180]
+        sid = (session_id or "bot_treat")[:180]
         platform = sid.split(":", 1)[0] if ":" in sid else ""
-        key = f"atri_treat_{uuid.uuid4().hex[:12]}"
+        key = f"bot_treat_{uuid.uuid4().hex[:12]}"
         full_kwargs = {
             "content": text[:800],
             "scope": "unknown",
@@ -980,12 +980,12 @@ class CompanionBridge:
             "platform": platform,
             "message_id": key,
             "memory_id": key,
-            "memory_type": "atri_treat_feed",
+            "memory_type": "bot_treat_feed",
             "reality_level": "bot_action",
             "sayability": "direct",
             "tags": list(tags)[:8],
             "metadata": {
-                "event_type": "atri_treat",
+                "event_type": "bot_treat",
                 "action_label": "投喂",
                 "text": text[:400],
             },
@@ -995,12 +995,12 @@ class CompanionBridge:
             return True
         except TypeError:
             try:
-                await recorder(content=text[:800], memory_type="atri_treat_feed",
-                               metadata={"event_type": "atri_treat", "tags": list(tags)[:8]})
+                await recorder(content=text[:800], memory_type="bot_treat_feed",
+                               metadata={"event_type": "bot_treat", "tags": list(tags)[:8]})
                 return True
             except Exception as e:
-                logger.warning(f"atri_treat: 记忆回写失败(精简参数): {_clip(e, 160)}")
+                logger.warning(f"bot_treat: 记忆回写失败(精简参数): {_clip(e, 160)}")
                 return False
         except Exception as e:
-            logger.warning(f"atri_treat: 记忆回写失败: {_clip(e, 160)}")
+            logger.warning(f"bot_treat: 记忆回写失败: {_clip(e, 160)}")
             return False

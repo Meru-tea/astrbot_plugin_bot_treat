@@ -1,4 +1,4 @@
-"""投喂判定与状态（astrbot_plugin_atri_treat）。
+"""投喂判定与状态（astrbot_plugin_bot_treat）。
 
 三层判定（从硬到软）：
   1. 安全硬闸 —— 纯代码，命中即拒绝，不进 LLM、不生图；
@@ -266,7 +266,7 @@ def save_states(path: str, states: dict) -> None:
             json.dump(states, fh, ensure_ascii=False, indent=1)
         os.replace(tmp, path)
     except Exception as e:
-        logger.debug(f"atri_treat: 状态写入失败: {e}")
+        logger.debug(f"bot_treat: 状态写入失败: {e}")
 
 
 def prune_states(states: dict, today: str) -> dict:

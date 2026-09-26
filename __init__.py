@@ -1,1 +1,1 @@
-# astrbot_plugin_atri_treat package marker
+# astrbot_plugin_bot_treat package marker

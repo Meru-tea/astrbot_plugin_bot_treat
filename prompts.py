@@ -1,4 +1,4 @@
-"""提示词常量（astrbot_plugin_atri_treat）。
+"""提示词常量（astrbot_plugin_bot_treat）。
 
 四套提示词：
   1. FOOD_RECOGNITION_*  —— 食物识别（视觉模型，输出结构化 JSON）
