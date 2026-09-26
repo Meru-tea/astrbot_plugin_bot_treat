@@ -75,6 +75,9 @@ data/plugins/
 
 随后重载插件或重启 AstrBot。**无需安装任何第三方依赖**（`requirements.txt` 为空）。
 
+> 从旧名 `astrbot_plugin_atri_treat` 升级？改名会同步影响配置文件名与插件数据目录，
+> 请先看 [CHANGELOG 的 v0.4.0 迁移说明](CHANGELOG.md)。
+
 ## 快速开始
 
 在 Bot 的**私聊**里发一张食物照片，然后发送：

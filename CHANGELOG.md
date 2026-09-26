@@ -2,6 +2,41 @@
 
 本文件记录**使用者可见**的变化。版本号遵循 `主.次.修订`。
 
+## [v0.4.0] - 2026-09-26
+
+### ⚠️ 破坏性变更：插件更名为 `astrbot_plugin_bot_treat`
+
+原名 `astrbot_plugin_atri_treat`。现在**仓库名、模块名、`metadata.name`、日志前缀与内部标识**统一改为
+`bot_treat`，与显示名「投喂bot」保持一致。功能没有任何变化。
+
+**为什么需要迁移**：AstrBot 用 `metadata.name` 反推插件目录名，并**据此定位配置文件和插件数据目录**。
+改名后若不迁移，插件仍能加载，但会**读不到你原来的配置**（回落成默认值），投喂状态也会重新开始计数。
+
+**仅从旧版本升级时需要做**（全新安装请忽略）：
+
+```bash
+cd <你的 AstrBot 数据目录>/data
+
+# 1) 插件目录
+mv plugins/astrbot_plugin_atri_treat   plugins/astrbot_plugin_bot_treat
+
+# 2) 插件配置（保住你改过的设置）
+mv config/astrbot_plugin_atri_treat_config.json \
+   config/astrbot_plugin_bot_treat_config.json
+
+# 3) 插件数据（保住投喂状态）
+mv plugin_data/astrbot_plugin_atri_treat   plugin_data/astrbot_plugin_bot_treat
+```
+
+完成后重启 AstrBot。装好确认无误后，可以删掉 `config/` 里遗留的
+`astrbot_plugin_atri_treat_config.json.bak.*` 备份文件。
+
+> 更名后日志里的行首标记也变成了 `bot_treat:`（原 `atri_treat:`），排查日志时注意。
+
+### 变更
+- 内部标识同步更名：`atri_treat_own` → `bot_treat_own`、`atri_treat_refs` → `bot_treat_refs`。
+  旧的暂存目录会残留在陪伴插件的数据目录里，可手动删除（不影响使用）。
+
 ## [v0.3.1] - 2026-09-26
 
 ### 新增

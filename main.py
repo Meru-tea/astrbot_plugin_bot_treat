@@ -53,7 +53,7 @@ from .decision import (
 from .prompts import FALLBACK_TEXTS, build_eat_prompt
 
 PLUGIN_NAME = "astrbot_plugin_bot_treat"
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 
 # 「本轮出站结果是本插件自己的」标记。投喂窗口内靠它区分「我们的进食图」与
 # 「陪伴插件对照片的迟到点评/表情包」——只放行自己的，其余丢弃。
