@@ -115,6 +115,9 @@ class TreatConfig:
     persona_text: str = ""
     # 留空 = 用 AstrBot 默认 provider / 陪伴插件配置的视觉模型（发布版默认留空）
     vision_provider_id: str = ""
+    # 留空 = 用 AstrBot 默认对话模型。**默认模型是推理模型时建议显式指定一个非推理模型**：
+    # 推理模型会把 max_tokens 花在思考上，JSON 决策拿不到正文（实测踩过）
+    llm_provider_id: str = ""
     vision_timeout_sec: int = 30
     llm_timeout_sec: int = 45
     # 生图单独的超时：带参考图的在线图片 API 实测可达 1-3 分钟，
@@ -179,6 +182,7 @@ class TreatConfig:
             ),
             persona_text=_as_text(_get("persona_text", "")),
             vision_provider_id=str(_get("vision_provider_id", "") or "").strip(),
+            llm_provider_id=str(_get("llm_provider_id", "") or "").strip(),
             vision_timeout_sec=max(5, _as_int(_get("vision_timeout_sec", 30), 30)),
             llm_timeout_sec=max(10, _as_int(_get("llm_timeout_sec", 45), 45)),
             photo_timeout_sec=max(30, _as_int(_get("photo_timeout_sec", 240), 240)),
@@ -478,6 +482,7 @@ async def decide_eat(
         max_tokens=500,
         task="feed_decision",
         timeout=float(cfg.llm_timeout_sec),
+        preferred_provider_id=cfg.llm_provider_id,
     )
     obj = _flatten_json(raw or "")
     if not obj:

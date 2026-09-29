@@ -61,7 +61,7 @@ from .prompts import FALLBACK_TEXTS, build_eat_prompt
 from . import standalone_image
 
 PLUGIN_NAME = "astrbot_plugin_bot_treat"
-VERSION = "0.5.2"
+VERSION = "0.5.3"
 
 # 入口 handler 的优先级。**必须是正数**，否则拿不到「照片事件」。
 #

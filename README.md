@@ -169,7 +169,8 @@ git clone https://github.com/Meru-tea/astrbot_plugin_bot_treat
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `vision_provider_id` | 空 | 食物识别用的视觉模型 provider id。**留空 = 用 AstrBot 当前默认模型**，推荐留空；该模型必须支持图片理解 |
+| `vision_provider_id` | 空 | 食物识别用的视觉模型 provider id。**留空 = 用 AstrBot 当前默认模型**；独立模式下若默认模型不能看图，会自动改用 AstrBot 的「图片理解」模型 |
+| `llm_provider_id` | 空 | 决策用的文本模型 provider id。**留空 = 用 AstrBot 当前默认模型**。如果默认模型是**推理模型**（会把 `max_tokens` 花在思考上、只输出 `reasoning_content`），决策会超时并退化成兜底台词，此时**建议显式指定一个非推理模型** |
 | `vision_timeout_sec` | `30` | 单次视觉识别超时 |
 | `llm_timeout_sec` | `45` | 进食决策（文本模型）超时 |
 | `image_lookback_sec` | `120` | **回看窗口**：照片与文字分成两条消息发送时，允许往前找这么久内收到的图片。设为 `0` 则关闭回看（此时必须先发图再发触发词，且两条消息要挨得足够近） |

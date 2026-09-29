@@ -57,6 +57,8 @@ DEFAULT_BRIDGE_MODE = BRIDGE_AUTO
 OWN_INBOUND_SUBDIR = "inbound_images"
 # 独立模式下自己的参考图暂存目录名
 OWN_REF_SUBDIR = "refs"
+# 面板「人物身份参考图」的配置键名（也决定上传落点 files/<键名>/）
+PERSONA_FILE_KEY = "persona_reference_image"
 
 
 def resolve_bridge_mode(value: Any) -> str:
@@ -529,6 +531,61 @@ class CompanionBridge:
             return ""
         return str(settings.get("default_image_caption_provider_id") or "").strip()
 
+    def _text_providers(self, preferred_id: str = "") -> Iterable[Any]:
+        """文本决策用的 provider 候选：用户指定的优先，其次 AstrBot 默认。
+
+        为什么需要显式指定（2026-09-29 实测踩坑）：AstrBot 的默认对话模型可能是**推理模型**
+        （本项目 `火山/glm-5.3-flash`：响应里只有 `reasoning_content`、`content` 为空），
+        给 JSON 决策这种小预算任务会一直想到超时（实测 45s 全耗在思考上）→ 拿不到 JSON。
+        指定一个非推理模型即可，如 `11/gemini-3-flash-preview`（实测 6.6s）。
+        """
+        preferred = str(preferred_id or "").strip()
+        seen: set[int] = set()
+        if preferred:
+            getter = getattr(self.context, "get_provider_by_id", None)
+            try:
+                provider = getter(preferred) if callable(getter) else None
+            except Exception as e:
+                provider = None
+                logger.warning(f"bot_treat: 取 llm_provider_id={preferred} 失败: {_clip(e, 120)}")
+            if provider is not None:
+                seen.add(id(provider))
+                yield provider
+            else:
+                logger.warning(
+                    f"bot_treat: llm_provider_id={preferred} 找不到对应 provider，回退 AstrBot 默认"
+                )
+        try:
+            provider = self.context.get_using_provider()
+        except Exception:
+            provider = None
+        if provider is not None and id(provider) not in seen:
+            yield provider
+
+    async def _text_call(self, provider, prompt: str, *, system_prompt: str,
+                         max_tokens: int, timeout: float) -> str:
+        """调一次 text_chat，兼容不同版本的关键字支持。"""
+        import asyncio
+
+        kwargs = {"prompt": prompt, "session_id": None, "max_tokens": max_tokens}
+        if system_prompt:
+            kwargs["system_prompt"] = system_prompt
+        try:
+            resp = await asyncio.wait_for(
+                provider.text_chat(**kwargs), timeout=max(5.0, float(timeout))
+            )
+        except TypeError as e:
+            # 有些版本/自定义 provider 的 text_chat 不收某些关键字 → 用最小参数再试一次，
+            # 但**绝不能丢掉 system_prompt**（JSON 输出契约就写在里面）
+            logger.debug(f"bot_treat: text_chat 关键字不兼容，退化重试: {_clip(e, 120)}")
+            minimal = {"prompt": prompt}
+            if system_prompt:
+                minimal["system_prompt"] = system_prompt
+            resp = await asyncio.wait_for(
+                provider.text_chat(**minimal), timeout=max(5.0, float(timeout))
+            )
+        return str(getattr(resp, "completion_text", "") or "").strip()
+
     def _vision_providers(self, preferred_id: str = "") -> Iterable[Any]:
         seen: set[int] = set()
         candidates: list[str] = []
@@ -699,20 +756,41 @@ class CompanionBridge:
                         logger.warning(f"bot_treat: 陪伴插件 LLM 调用失败(精简): {_clip(e, 200)}")
                 except Exception as e:
                     logger.warning(f"bot_treat: 陪伴插件 LLM 调用失败: {_clip(e, 200)}")
-        try:
-            import asyncio
-
-            provider = self.context.get_using_provider()
-            if provider is not None and callable(getattr(provider, "text_chat", None)):
-                resp = await asyncio.wait_for(
-                    provider.text_chat(prompt=prompt, session_id=None),
-                    timeout=max(5.0, float(timeout)),
+        # 兜底链：用户指定的 provider（llm_provider_id）→ AstrBot 默认对话模型。
+        # ⚠️ 以前这里**丢掉 system_prompt**，而 JSON 输出契约恰恰写在 system_prompt 里
+        #（见 prompts.DECISION_SYSTEM_TMPL）⇒ 即使调用成功也解析不出 JSON，
+        # 表现为"决策总是走兜底台词、场景描述退化成 正在吃XXX"。必须带上。
+        tried: list[str] = []
+        for provider in self._text_providers(preferred_provider_id):
+            label = self._provider_label(provider)
+            if not callable(getattr(provider, "text_chat", None)):
+                continue
+            tried.append(label)
+            try:
+                text = await self._text_call(
+                    provider,
+                    prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=max_tokens,
+                    timeout=float(timeout),
                 )
-                text = getattr(resp, "completion_text", None)
-                if text:
-                    return str(text).strip()
-        except Exception as e:
-            logger.warning(f"bot_treat: 兜底 LLM 调用失败: {_clip(e, 200)}")
+            except Exception as e:
+                # 必须带异常类型：TimeoutError 的 str() 是空的，只打 message 会得到空白行
+                logger.warning(
+                    f"bot_treat: 兜底 LLM 调用失败 provider={label}"
+                    f"({type(e).__name__}): {_clip(e, 160) or '(无消息)'}"
+                )
+                continue
+            if text:
+                logger.info(f"bot_treat: 兜底 LLM provider={label} 成功（{len(text)} 字）")
+                return text
+            logger.warning(
+                f"bot_treat: 兜底 LLM provider={label} 返回空正文"
+                f"（推理模型可能把 max_tokens 全花在思考上；换一个非推理模型，"
+                f"或调大 llm_timeout_sec / 用 llm_provider_id 指定模型）"
+            )
+        if tried:
+            logger.warning(f"bot_treat: 兜底 LLM 全部失败：{_clip('、'.join(tried), 160)}")
         return None
 
     # -------------------------------------------------- 生图接口地址临时覆盖
@@ -1050,10 +1128,21 @@ class CompanionBridge:
                     f"也不是面板上传的相对路径、也不是可下载的 URL）：{_clip(candidate, 120)}"
                 )
             if not wants:
-                logger.warning(
-                    "bot_treat: [独立模式] 面板里没上传「人物身份参考图」，"
-                    "本次生成没有人物身份参考图（脸不保证与人设一致）"
-                )
+                # 面板上传的图会落到本插件 data_dir/files/<键名>/，但**配置值只有在点
+                # 「保存并关闭」时才会写回**。漏点保存就会留下"有文件、配置是空"的孤儿状态，
+                # 用户看到的却只是"生成的人不像"。这里把话说透。
+                orphans = self._own_uploaded_files(PERSONA_FILE_KEY)
+                if orphans:
+                    logger.warning(
+                        f"bot_treat: [独立模式] 配置里没有参考图，但上传目录里有 {len(orphans)} 张"
+                        f"（最新：{_clip(os.path.basename(orphans[0]), 60)}）——"
+                        "多半是上传后忘了点面板右下角的「保存并关闭」"
+                    )
+                else:
+                    logger.warning(
+                        "bot_treat: [独立模式] 面板里没上传「人物身份参考图」，"
+                        "本次生成没有人物身份参考图（脸不保证与人设一致）"
+                    )
             return ""
 
         plugin = self.get_plugin()
@@ -1133,6 +1222,26 @@ class CompanionBridge:
     def _is_local_file(value: str) -> bool:
         text = str(value or "").strip()
         return bool(text) and os.path.isabs(text) and os.path.isfile(text)
+
+    def _own_uploaded_files(self, key: str) -> list:
+        """本插件 data_dir 下 `files/<键名>/` 里实际存在的图片（面板上传的落点），新→旧。"""
+        target = os.path.join(self._cache_dir(), "files", str(key))
+        try:
+            names = os.listdir(target)
+        except Exception:
+            return []
+        found: list[tuple[float, str]] = []
+        for name in names:
+            if os.path.splitext(name)[1].lower() not in _IMAGE_EXT:
+                continue
+            path = os.path.join(target, name)
+            try:
+                if os.path.isfile(path):
+                    found.append((os.path.getmtime(path), path))
+            except Exception:
+                continue
+        found.sort(reverse=True)
+        return [path for _, path in found]
 
     def _resolve_own_relative(self, value: str) -> str:
         """把 `type: "file"` 配置里的**相对路径**解析成本插件 data_dir 下的绝对路径。

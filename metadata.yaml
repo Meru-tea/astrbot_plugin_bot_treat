@@ -2,7 +2,7 @@ name: astrbot_plugin_bot_treat
 display_name: 投喂bot
 short_desc: 给 Bot 发一张食物照片并说「投喂」，她会按人设与状态判断吃不吃，吃就生成正在吃该食物的照片
 desc: 投喂bot：把食物照片发给 Bot 并说「投喂」，她会结合人设、时间与饱腹状态自主决定吃不吃——吃就生成一张她正在吃该食物的照片（你的照片会作为场景参考参与生成），不吃就给一句符合人设的拒绝。支持私聊 / 群聊，斜杠命令与自然语言两种触发方式。
-version: 0.5.2
+version: 0.5.3
 author: Meru
 repo: https://github.com/Meru-tea/astrbot_plugin_bot_treat
 astrbot_version: ">=4.24,<5"

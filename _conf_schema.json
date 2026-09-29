@@ -77,7 +77,12 @@
     "default": ""
   },
   "vision_provider_id": {
-    "description": "食物识别用的视觉模型 provider id，留空用 AstrBot 默认",
+    "description": "食物识别用模型，留空用 AstrBot 默认",
+    "type": "string",
+    "default": ""
+  },
+  "llm_provider_id": {
+    "description": "决策用文本模型，留空用默认；默认是推理模型时建议指定",
     "type": "string",
     "default": ""
   },
