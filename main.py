@@ -61,7 +61,7 @@ from .prompts import FALLBACK_TEXTS, build_eat_prompt
 from . import standalone_image
 
 PLUGIN_NAME = "astrbot_plugin_bot_treat"
-VERSION = "0.5.3"
+VERSION = "0.5.4"
 
 # 入口 handler 的优先级。**必须是正数**，否则拿不到「照片事件」。
 #
@@ -240,7 +240,10 @@ class BotTreatPlugin(Star):
         # 桥的模式与人设文本在构造时读入；WebUI 改配置后走热重载/重启生效
         _boot_cfg = TreatConfig.from_raw(config)
         self.bridge = CompanionBridge(
-            context, mode=_boot_cfg.bridge_mode, persona_text=_boot_cfg.persona_text
+            context,
+            mode=_boot_cfg.bridge_mode,
+            persona_text=_boot_cfg.persona_text,
+            persona_id=_boot_cfg.persona_id,
         )
         self._seen: dict[str, float] = {}
         # 会话键 -> 抑制窗口到期时间戳：窗口内只放行本插件自己的出站结果
@@ -286,8 +289,11 @@ class BotTreatPlugin(Star):
                     "bot_treat: [独立模式] 面板里没上传「人物身份参考图」，"
                     "生成的人物不会与人设保持同一张脸"
                 )
-            if not cfg.persona_text:
-                logger.info("bot_treat: [独立模式] persona_text 为空，将使用内置中性兜底人设")
+            if not cfg.persona_text and not cfg.persona_id:
+                logger.info(
+                    "bot_treat: [独立模式] 未指定角色人格/人设文本，将使用 AstrBot 当前默认人格"
+                    "（再取不到才用内置中性兜底）"
+                )
         # 参考图策略：use_food_as_ref 时同时传「人设图 + 食物图」并用序数语法分派角色
         # （第1张 identity / 第2张 scene），人设图取不到时自动退回不传参考图。
         logger.info(

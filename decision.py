@@ -111,8 +111,9 @@ class TreatConfig:
     use_food_as_ref: bool = True
     # 人物身份参考图（WebUI 的「管理文件」上传，存的是相对本插件 data_dir 的路径列表）
     persona_reference_image: list = field(default_factory=list)
-    # 【独立模式】角色人设文本；留空 = 用 prompts.PERSONA_FALLBACK
+    # 【独立模式】角色人设：优先手动文本，其次面板选的人格（留空 = AstrBot 默认人格）
     persona_text: str = ""
+    persona_id: str = ""
     # 留空 = 用 AstrBot 默认 provider / 陪伴插件配置的视觉模型（发布版默认留空）
     vision_provider_id: str = ""
     # 留空 = 用 AstrBot 默认对话模型。**默认模型是推理模型时建议显式指定一个非推理模型**：
@@ -181,6 +182,7 @@ class TreatConfig:
                 or _as_files(_get("persona_reference_image_path", ""))
             ),
             persona_text=_as_text(_get("persona_text", "")),
+            persona_id=_as_text(_get("persona_id", "")),
             vision_provider_id=str(_get("vision_provider_id", "") or "").strip(),
             llm_provider_id=str(_get("llm_provider_id", "") or "").strip(),
             vision_timeout_sec=max(5, _as_int(_get("vision_timeout_sec", 30), 30)),

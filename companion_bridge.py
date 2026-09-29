@@ -113,22 +113,28 @@ def _file_uri_to_path(value: str) -> str:
 
 
 class CompanionBridge:
-    def __init__(self, context, mode: str = DEFAULT_BRIDGE_MODE, persona_text: str = ""):
+    def __init__(self, context, mode: str = DEFAULT_BRIDGE_MODE, persona_text: str = "",
+                 persona_id: str = ""):
         self.context = context
         # 模式与独立模式人设文本在**构造时**读入。配置改动走热重载/重启即可生效
         # （热重载会新建插件实例 → 新建桥）。也可显式调 set_mode() 热改。
         self.mode = resolve_bridge_mode(mode)
         self.persona_text = str(persona_text or "").strip()
+        # 面板用 AstrBot 的「选择人格」控件选出来的人格名（留空 = 用 AstrBot 默认人格）
+        self.persona_id = str(persona_id or "").strip()
         self._plugin: Any = None
         self._found_at = 0.0
 
     # -------------------------------------------------- 模式
 
-    def set_mode(self, mode: str, persona_text: Optional[str] = None) -> None:
-        """运行时热改模式（不改配置文件）。"""
+    def set_mode(self, mode: str, persona_text: Optional[str] = None,
+                 persona_id: Optional[str] = None) -> None:
+        """运行时热改模式/人设（不改配置文件）。"""
         self.mode = resolve_bridge_mode(mode)
         if persona_text is not None:
             self.persona_text = str(persona_text or "").strip()
+        if persona_id is not None:
+            self.persona_id = str(persona_id or "").strip()
 
     def effective_mode(self) -> str:
         """实际生效的模式：auto 按「陪伴插件在不在」动态判定。
@@ -998,11 +1004,61 @@ class CompanionBridge:
 
     # -------------------------------------------------- 人设
 
+    def _astrbot_persona_prompt(self) -> str:
+        """读 AstrBot 里的人格正文：优先面板选的那个人格，留空/失效则用 AstrBot 当前默认人格。
+
+        依据（2026-09-30 源码核实）：`context.persona_manager.get_persona_v3_by_id(id)`
+        是**同步**方法，`"default"` 返回内置 DEFAULT_PERSONALITY，其余按**人格名**匹配
+        （`persona["name"] == id`，所以面板存的是名字，不是 uuid）；人格对象是 TypedDict，
+        正文在 `prompt` 字段。当前默认人格名在 `provider_settings.default_personality`。
+        """
+        pm = getattr(self.context, "persona_manager", None)
+        getter = getattr(pm, "get_persona_v3_by_id", None)
+        if not callable(getter):
+            return ""
+        persona = None
+        try:
+            if self.persona_id:
+                persona = getter(self.persona_id)
+                if persona is None:
+                    logger.warning(
+                        f"bot_treat: 面板选择的角色人格 {self.persona_id!r} 不存在"
+                        "（可能已改名或删除），回退 AstrBot 当前默认人格"
+                    )
+            if persona is None:
+                default_id = "default"
+                try:
+                    cfg = self.context.get_config()
+                    settings = cfg.get("provider_settings") if hasattr(cfg, "get") else None
+                    if isinstance(settings, dict):
+                        default_id = str(settings.get("default_personality") or "default")
+                except Exception:
+                    pass
+                persona = getter(default_id)
+        except Exception as e:
+            logger.warning(f"bot_treat: 读取 AstrBot 人格失败({type(e).__name__}): {_clip(e, 160)}")
+            return ""
+        if not isinstance(persona, dict):
+            return ""
+        prompt = str(persona.get("prompt") or "").strip()
+        if prompt:
+            logger.info(
+                f"bot_treat: [独立模式] 人设取自 AstrBot 人格 {persona.get('name')!r}"
+                f"（{len(prompt)} 字）"
+            )
+        return prompt
+
     def persona_excerpt(self, limit: int = 900) -> str:
         if self.is_standalone():
-            # 独立模式：用本插件配置里自己填的人设；留空则返回空串，
-            # 由 prompts.build_decision_system 兜到 PERSONA_FALLBACK（中性兜底）。
-            return _clip(self.persona_text, limit)
+            # 1) 手动填的「人设文本」最优先（更具体、更像有意覆盖）
+            if self.persona_text:
+                return _clip(self.persona_text, limit)
+            # 2) 面板选的角色人格；留空 = AstrBot 当前默认人格
+            picked = self._astrbot_persona_prompt()
+            if picked:
+                return _clip(picked, limit)
+            # 3) 都没有 → 空串，交给 prompts.build_decision_system 兜到中性兜底
+            return ""
         plugin = self.get_plugin()
         if plugin is None:
             return ""
