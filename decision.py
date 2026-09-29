@@ -17,7 +17,12 @@ from typing import Any, Optional
 
 from astrbot.api import logger
 
-from .companion_bridge import _flatten_json
+from .companion_bridge import (
+    BRIDGE_MODES,
+    DEFAULT_BRIDGE_MODE,
+    _flatten_json,
+    resolve_bridge_mode,
+)
 from .prompts import (
     FALLBACK_TEXTS,
     FOOD_RECOGNITION_SYSTEM,
@@ -28,6 +33,11 @@ from .prompts import (
 
 STATE_FILE_NAME = "feed_state.json"
 STATE_KEEP_DAYS = 7
+
+# 运行模式（bridge_mode）的常量与解析函数定义在 companion_bridge（避免循环导入）：
+#   companion  —— 只用陪伴插件桥（0.4.0 及以前的行为，硬依赖）
+#   standalone —— 完全独立运行，不碰陪伴插件任何私有方法
+#   auto       —— 有陪伴插件就走桥，取不到就自动降级为独立（默认）
 
 
 # ---------------------------------------------------------------- 配置
@@ -72,6 +82,8 @@ def _as_list(value: Any) -> list:
 
 @dataclass
 class TreatConfig:
+    # 运行模式：auto / companion / standalone（见模块顶部说明）
+    bridge_mode: str = DEFAULT_BRIDGE_MODE
     enable_feed: bool = True
     enable_private: bool = True
     enable_group: bool = True
@@ -86,6 +98,8 @@ class TreatConfig:
     use_food_as_ref: bool = True
     # 人物身份参考图（本地绝对路径或 URL）；留空 = 自动用陪伴插件配置的人物参考图
     persona_reference_image_path: str = ""
+    # 【独立模式】角色人设文本；留空 = 用 prompts.PERSONA_FALLBACK
+    persona_text: str = ""
     # 留空 = 用 AstrBot 默认 provider / 陪伴插件配置的视觉模型（发布版默认留空）
     vision_provider_id: str = ""
     vision_timeout_sec: int = 30
@@ -98,6 +112,8 @@ class TreatConfig:
     photo_api_key: str = ""
     photo_api_model: str = ""
     photo_api_size: str = ""
+    # 【独立模式】出图尺寸；photo_api_size 留空时用这个
+    standalone_photo_size: str = "1024x1024"
     # 接口覆盖的保持秒数（地址解析在生图开始后 ~20ms 完成）
     photo_api_override_sec: int = 15
     min_image_bytes: int = 6144
@@ -129,7 +145,11 @@ class TreatConfig:
         kind = str(_get("gen_kind", "selfie") or "selfie").strip().lower()
         if kind not in ("selfie", "edit", "text2img"):
             kind = "selfie"
+        # 模式白名单校验：非法值（含 None / 空 / 拼错）一律回落默认 auto，
+        # 绝不让一个错别字把插件打成"桥不可用"。
+        mode = resolve_bridge_mode(_get("bridge_mode", DEFAULT_BRIDGE_MODE))
         return cls(
+            bridge_mode=mode,
             enable_feed=_as_bool(_get("enable_feed", True), True),
             enable_private=_as_bool(_get("enable_private", True), True),
             enable_group=_as_bool(_get("enable_group", True), True),
@@ -140,6 +160,7 @@ class TreatConfig:
             gen_kind=kind,
             use_food_as_ref=_as_bool(_get("use_food_as_ref", True), True),
             persona_reference_image_path=_as_text(_get("persona_reference_image_path", "")),
+            persona_text=_as_text(_get("persona_text", "")),
             vision_provider_id=str(_get("vision_provider_id", "") or "").strip(),
             vision_timeout_sec=max(5, _as_int(_get("vision_timeout_sec", 30), 30)),
             llm_timeout_sec=max(10, _as_int(_get("llm_timeout_sec", 45), 45)),
@@ -148,6 +169,9 @@ class TreatConfig:
             photo_api_key=_as_text(_get("photo_api_key", "")),
             photo_api_model=_as_text(_get("photo_api_model", "")),
             photo_api_size=_as_text(_get("photo_api_size", "")),
+            standalone_photo_size=(
+                _as_text(_get("standalone_photo_size", "")) or "1024x1024"
+            ),
             photo_api_override_sec=max(1, _as_int(_get("photo_api_override_sec", 15), 15)),
             min_image_bytes=max(0, _as_int(_get("min_image_bytes", 6144), 6144)),
             image_lookback_sec=max(0, _as_int(_get("image_lookback_sec", 120), 120)),

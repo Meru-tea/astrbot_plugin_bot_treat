@@ -27,6 +27,8 @@ from typing import AsyncGenerator, Optional
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.message_components import Image as ImageComp
+from astrbot.api.message_components import Plain as PlainComp
 from astrbot.api.star import Context, Star, StarTools, register
 
 try:  # 规范导入；失败时退回 filter 命名空间，保证插件仍可加载
@@ -34,7 +36,12 @@ try:  # 规范导入；失败时退回 filter 命名空间，保证插件仍可�
 except Exception:  # pragma: no cover
     EventMessageType = filter.EventMessageType  # type: ignore[attr-defined]
 
-from .companion_bridge import CompanionBridge, _clip
+from .companion_bridge import (
+    BRIDGE_COMPANION,
+    BRIDGE_STANDALONE,
+    CompanionBridge,
+    _clip,
+)
 from .decision import (
     TreatConfig,
     decide_eat,
@@ -51,9 +58,10 @@ from .decision import (
     today_key,
 )
 from .prompts import FALLBACK_TEXTS, build_eat_prompt
+from . import standalone_image
 
 PLUGIN_NAME = "astrbot_plugin_bot_treat"
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 # 「本轮出站结果是本插件自己的」标记。投喂窗口内靠它区分「我们的进食图」与
 # 「陪伴插件对照片的迟到点评/表情包」——只放行自己的，其余丢弃。
@@ -212,7 +220,11 @@ class BotTreatPlugin(Star):
             os.makedirs(self._data_dir, exist_ok=True)
         except Exception as e:
             logger.warning(f"bot_treat: 数据目录创建失败: {e}")
-        self.bridge = CompanionBridge(context)
+        # 桥的模式与人设文本在构造时读入；WebUI 改配置后走热重载/重启生效
+        _boot_cfg = TreatConfig.from_raw(config)
+        self.bridge = CompanionBridge(
+            context, mode=_boot_cfg.bridge_mode, persona_text=_boot_cfg.persona_text
+        )
         self._seen: dict[str, float] = {}
         # 会话键 -> 抑制窗口到期时间戳：窗口内只放行本插件自己的出站结果
         self._feed_windows: dict[str, float] = {}
@@ -228,17 +240,49 @@ class BotTreatPlugin(Star):
 
     async def initialize(self):
         cfg = self.cfg()
+        effective = self.bridge.effective_mode()
         logger.info(
             f"bot_treat: 投喂bot v{VERSION} 已加载"
-            f"（数据目录 {self._data_dir}，陪伴插件桥"
-            f"{'可用' if self.bridge.available() else '暂不可用（稍后自动重试）'}）"
+            f"（数据目录 {self._data_dir}，"
+            f"模式 bridge_mode={cfg.bridge_mode}→实际={effective}，"
+            f"陪伴插件桥{'可用' if self.bridge.available() else '不可用'}）"
         )
+        if effective == BRIDGE_STANDALONE:
+            missing = [
+                name
+                for name, value in (
+                    ("photo_api_base_url", cfg.photo_api_base_url),
+                    ("photo_api_key", cfg.photo_api_key),
+                    ("photo_api_model", cfg.photo_api_model),
+                )
+                if not str(value or "").strip()
+            ]
+            if missing:
+                logger.warning(
+                    f"bot_treat: [独立模式] 生图接口未配置完整，缺 {'/'.join(missing)} ——"
+                    f"能识别与决策，但出图会失败（回执 no_api_config，不消耗额度）"
+                )
+            if not str(cfg.persona_reference_image_path or "").strip():
+                logger.warning(
+                    "bot_treat: [独立模式] 未配置 persona_reference_image_path，"
+                    "生成的人物不会与人设保持同一张脸"
+                )
+            if not cfg.persona_text:
+                logger.info("bot_treat: [独立模式] persona_text 为空，将使用内置中性兜底人设")
         # 参考图策略：use_food_as_ref 时同时传「人设图 + 食物图」并用序数语法分派角色
         # （第1张 identity / 第2张 scene），人设图取不到时自动退回不传参考图。
         logger.info(
             f"bot_treat: 参考图策略 use_food_as_ref={cfg.use_food_as_ref} "
             f"gen_kind={cfg.gen_kind}"
-            + ("（食物图将作为第2张 scene 参考参与生成）" if cfg.use_food_as_ref else "（仅用陪伴插件自动人设图）")
+            + (
+                "（独立模式：直接传 [人设图, 食物图]，不用序数说明）"
+                if effective == BRIDGE_STANDALONE
+                else (
+                    "（食物图将作为第2张 scene 参考参与生成）"
+                    if cfg.use_food_as_ref
+                    else "（仅用陪伴插件自动人设图）"
+                )
+            )
         )
         logger.info(
             f"bot_treat: 唯一回复策略 照片挂起={cfg.photo_hold_sec}s "
@@ -769,6 +813,9 @@ class BotTreatPlugin(Star):
         #   （proactive_message.py 约 16263 行的分支要求 not candidates and not paths）。
         #   所以要让食物照片参与生成，就必须把**人设图也一并传**，并用「第1张/第2张」
         #   序数角色说明逐张指定角色 —— 否则食物图会被默认标成 identity，把脸挤掉。
+        #   独立模式没有这套序数解析（我们自己打接口），直接传 [人设图, 食物图]，
+        #   prompt 里**不加**序数说明（加了只会污染提示词）。
+        standalone = self.bridge.is_standalone()
         reference_paths: list[str] = []
         with_food_ref = False
         if cfg.use_food_as_ref:
@@ -785,37 +832,65 @@ class BotTreatPlugin(Star):
             else:
                 logger.warning(
                     "bot_treat: use_food_as_ref=true 但未取到角色人设参考图，"
-                    "本次退回「不传参考图」以保住脸一致（陪伴插件会自动上人设图）"
+                    + (
+                        "独立模式下本次按纯文生图生成（脸不保证与人设一致）"
+                        if standalone
+                        else "本次退回「不传参考图」以保住脸一致（陪伴插件会自动上人设图）"
+                    )
                 )
 
         prompt = build_eat_prompt(
             food.name,
             food.appearance,
             decision.eat_scene_prompt,
-            with_food_reference=with_food_ref,
+            with_food_reference=with_food_ref and not standalone,
         )
-        receipt = await self.bridge.generate_photo(
-            event,
-            prompt=prompt,
-            kind=cfg.gen_kind,
-            reference_image_paths=reference_paths or None,
-            caption=decision.reply_text,
-            send=not cfg.dry_run,
-            timeout=float(cfg.photo_timeout_sec),
-            api_base_url=cfg.photo_api_base_url,
-            api_key=cfg.photo_api_key,
-            api_model=cfg.photo_api_model,
-            api_size=cfg.photo_api_size,
-            api_override_sec=float(cfg.photo_api_override_sec),
-        )
+
+        if standalone:
+            # 独立模式：直接打用户配置的 OpenAI 兼容图片接口，本插件自己发结果。
+            # 实测（gemai.huchan.cn + gpt-image-2.5）：/images/edits 带 1-2 张参考图
+            # 均 200 并直接回 b64_json；见 standalone_image 顶部说明。
+            receipt = await standalone_image.generate_photo(
+                self._data_dir,
+                base_url=cfg.photo_api_base_url,
+                api_key=cfg.photo_api_key,
+                model=cfg.photo_api_model,
+                size=cfg.photo_api_size or cfg.standalone_photo_size,
+                prompt=prompt,
+                reference_paths=reference_paths or None,
+                kind=cfg.gen_kind,
+                timeout=float(cfg.photo_timeout_sec),
+            )
+        else:
+            receipt = await self.bridge.generate_photo(
+                event,
+                prompt=prompt,
+                kind=cfg.gen_kind,
+                reference_image_paths=reference_paths or None,
+                caption=decision.reply_text,
+                send=not cfg.dry_run,
+                timeout=float(cfg.photo_timeout_sec),
+                api_base_url=cfg.photo_api_base_url,
+                api_key=cfg.photo_api_key,
+                api_model=cfg.photo_api_model,
+                api_size=cfg.photo_api_size,
+                api_override_sec=float(cfg.photo_api_override_sec),
+            )
         status = str(receipt.get("status") or "").lower()
         generated = bool(receipt.get("generated")) or status in STATUS_OK
         # reference_roles 是「有没有用上角色身份参考图」的运行时证据，务必记日志
         roles = receipt.get("reference_roles")
+        image_path = str(receipt.get("path") or "")
+        if standalone and generated:
+            # 独立模式必须拿到真实落盘文件才算成功（companion 模式那边是它自己发的）
+            generated = bool(image_path) and os.path.isfile(image_path)
         logger.info(
-            f"bot_treat: 生图回执 status={status} generated={generated} "
+            f"bot_treat: 生图回执 mode={'standalone' if standalone else 'companion'} "
+            f"status={status} generated={generated} "
             f"reference_roles={roles} food={food.name} kind={cfg.gen_kind} "
-            f"use_food_as_ref={cfg.use_food_as_ref}"
+            f"use_food_as_ref={cfg.use_food_as_ref} "
+            f"elapsed={receipt.get('elapsed', '-')}s"
+            + (f" path={_clip(image_path, 120)}" if standalone else "")
         )
 
         note_feed(self._states, user_id, today, accepted=generated)
@@ -833,7 +908,21 @@ class BotTreatPlugin(Star):
             return
 
         if generated:
-            # 图片已由生图工具连同 caption 发出，是本次唯一的可见回复
+            if standalone:
+                # 独立模式：图是我们自己生成的，「发出去」也得自己干。
+                # 图片与 caption 走**同一条**消息链，免得被出站闸门当成两条。
+                # own 标记已在 _arm_feed 里设好，闸门会放行这条。
+                try:
+                    yield event.chain_result(
+                        [ImageComp.fromFileSystem(image_path), PlainComp(decision.reply_text)]
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"bot_treat: [独立模式] 进食图发送失败({type(e).__name__}): {_clip(e, 200)}"
+                    )
+                    yield event.plain_result(FALLBACK_TEXTS["gen_failed"])
+                    return
+            # companion 模式：图片已由生图工具连同 caption 发出，是本次唯一的可见回复
             # （默认 LLM 链路已在入口处掐掉，此处无需重复处理）
             if cfg.enable_memory_writeback:
                 await self.bridge.memory_writeback(
@@ -847,6 +936,10 @@ class BotTreatPlugin(Star):
         #（那句话是以"已经吃了"为前提写的，配上失败会变成假的完成暗示）
         if status in ("quota_exhausted", "unauthorized"):
             text_out = FALLBACK_TEXTS["quota_exhausted"]
+        elif status == "no_api_config":
+            text_out = FALLBACK_TEXTS["no_api_config"]
+        elif status == "invalid_reference":
+            text_out = FALLBACK_TEXTS["invalid_reference"]
         else:
             text_out = FALLBACK_TEXTS["gen_failed"]
         logger.info(f"bot_treat: 生图未成功 status={status} detail={_clip(receipt.get('message'), 200)}")

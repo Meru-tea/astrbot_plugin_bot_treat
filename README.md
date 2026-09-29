@@ -8,7 +8,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/AstrBot-4.24%2B-4b6bfb?style=flat-square" alt="AstrBot 4.24+">
-  <img src="https://img.shields.io/badge/依赖-astrbot__plugin__private__companion-ff7a45?style=flat-square" alt="依赖 private_companion">
+  <img src="https://img.shields.io/badge/依赖-astrbot__plugin__private__companion(可选)-ff7a45?style=flat-square" alt="可选依赖 private_companion">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-3fb950?style=flat-square" alt="MIT"></a>
 </p>
 
@@ -30,7 +30,7 @@
 3. **吃了就出图** —— 生成一张「正在吃你发的这个食物」的照片。**你的照片会作为场景参考一起参与生成**，那份食物真的会被画进去；
 4. **不吃就给拒绝** —— 一句符合人设的傲娇拒绝，而不是冷冰冰的「操作失败」。
 
-一切都由**陪伴插件的人设**驱动，因此它不绑定任何特定角色 —— 换一份人格，说话方式就跟着换。
+一切都由**角色人设**驱动（默认取自陪伴插件，独立模式用你填的 `persona_text`），因此它不绑定任何特定角色 —— 换一份人格，说话方式就跟着换。
 
 ## 特性
 
@@ -45,15 +45,38 @@
 
 ## 前置依赖
 
-> **必须先有陪伴插件才能使用。** 本插件不自己实现视觉、生图与人设，这些全部复用：
+本插件有两种运行模式，用 `bridge_mode` 切换（默认 `auto`）：
+
+| `bridge_mode` | 行为 | 需要陪伴插件？ |
+| --- | --- | --- |
+| **`auto`**（默认） | 装了陪伴插件就走它，没有就自动独立运行 | 可选 |
+| `companion` | 只走陪伴插件桥（旧行为） | **必须** |
+| `standalone` | 完全独立运行，不碰陪伴插件 | 不需要 |
+
+### 模式 A：配合陪伴插件（`auto` / `companion`）
+
+复用陪伴插件的能力，只需它能正常工作：
 
 | 依赖 | 用途 | 说明 |
 | --- | --- | --- |
-| `astrbot_plugin_private_companion`（陪伴插件） | 人设、视觉理解、生图、图片落盘、状态注入 | **硬依赖**；装了但未启用时本插件会提示「桥不可用」 |
-| 可用的视觉模型 | 识别食物 | 需支持图片理解；配置留空即用 AstrBot 当前默认模型 |
-| 可用的生图后端 | 出图 | 在陪伴插件侧配置（在线图片 API / ComfyUI 等），本插件不重复配置 |
+| `astrbot_plugin_private_companion`（陪伴插件） | 人设、视觉理解、生图、图片落盘 | 装了但未启用时，`companion` 模式会提示「桥不可用」；`auto` 会自动转独立模式 |
+| 可用的视觉模型 | 识别食物 | 留空即用 AstrBot 当前默认模型 |
+| 可用的生图后端 | 出图 | 在陪伴插件侧配置，本插件不重复配置 |
 
-未安装陪伴插件时本插件**不会工作**（设计如此，不做降级）。
+### 模式 B：独立运行（`standalone`，或 `auto` 下没装陪伴插件）
+
+不依赖陪伴插件，需要你自备：
+
+| 需要准备 | 配置项 | 说明 |
+| --- | --- | --- |
+| **OpenAI 兼容的图片接口** | `photo_api_base_url`、`photo_api_key`、`photo_api_model`、`standalone_photo_size` | 只支持**同步协议**（响应直接带图片数据）；返回 `task_id` 的异步接口不支持 |
+| **角色人设文本** | `persona_text` | 留空则用内置的中性兜底人设 |
+| **人物身份参考图** | `persona_reference_image_path` | 本地绝对路径或图片 URL；不给的话人物不会与人设保持同一张脸 |
+
+> 独立模式下视觉识别与文本决策同样走 **AstrBot 当前默认模型**，不需要额外配置。
+> 生图接口地址会自动补 `/v1`；无参考图走 `/images/generations`，有参考图走 `/images/edits`。
+
+无论哪种模式，都**不会**修改陪伴插件的任何文件与配置 —— 独立模式连它的私有方法都不会调用。
 
 ## 安装
 

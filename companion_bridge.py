@@ -39,6 +39,31 @@ _ENDPOINT_ORIGINALS: dict[int, list] = {}
 
 _IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
 
+# ---------------------------------------------------------------- 运行模式
+#
+# 三种模式（插件配置 bridge_mode）：
+#   companion  —— 只用陪伴插件桥（0.4.0 及以前的行为，硬依赖）
+#   standalone —— 完全独立运行：**绝不调用陪伴插件的任何私有方法**
+#   auto       —— 有陪伴插件就走桥，取不到就自动降级为独立（默认）
+#
+# 常量定义在本模块（而非 decision）是为了避免循环导入：
+# decision 已经 `from .companion_bridge import _flatten_json`。
+BRIDGE_COMPANION = "companion"
+BRIDGE_STANDALONE = "standalone"
+BRIDGE_AUTO = "auto"
+BRIDGE_MODES = (BRIDGE_COMPANION, BRIDGE_STANDALONE, BRIDGE_AUTO)
+DEFAULT_BRIDGE_MODE = BRIDGE_AUTO
+# 独立模式下自己的入站图落盘目录名（放在本插件 data_dir 下）
+OWN_INBOUND_SUBDIR = "inbound_images"
+# 独立模式下自己的参考图暂存目录名
+OWN_REF_SUBDIR = "refs"
+
+
+def resolve_bridge_mode(value: Any) -> str:
+    """配置值 → 合法模式；非法/空/拼错一律回落 auto（绝不让错别字把插件打瘫）。"""
+    mode = str(value or "").strip().lower()
+    return mode if mode in BRIDGE_MODES else DEFAULT_BRIDGE_MODE
+
 
 async def _acall(fn, *args, **kwargs) -> Any:
     """调用可能是 sync/async 的方法并统一等待结果。"""
@@ -86,14 +111,42 @@ def _file_uri_to_path(value: str) -> str:
 
 
 class CompanionBridge:
-    def __init__(self, context):
+    def __init__(self, context, mode: str = DEFAULT_BRIDGE_MODE, persona_text: str = ""):
         self.context = context
+        # 模式与独立模式人设文本在**构造时**读入。配置改动走热重载/重启即可生效
+        # （热重载会新建插件实例 → 新建桥）。也可显式调 set_mode() 热改。
+        self.mode = resolve_bridge_mode(mode)
+        self.persona_text = str(persona_text or "").strip()
         self._plugin: Any = None
         self._found_at = 0.0
+
+    # -------------------------------------------------- 模式
+
+    def set_mode(self, mode: str, persona_text: Optional[str] = None) -> None:
+        """运行时热改模式（不改配置文件）。"""
+        self.mode = resolve_bridge_mode(mode)
+        if persona_text is not None:
+            self.persona_text = str(persona_text or "").strip()
+
+    def effective_mode(self) -> str:
+        """实际生效的模式：auto 按「陪伴插件在不在」动态判定。
+
+        auto 是**惰性**的：每次调用都重新看一次 —— 陪伴插件被停用时无需重启，
+        下一条消息就自动走独立模式。
+        """
+        if self.mode == BRIDGE_AUTO:
+            return BRIDGE_COMPANION if self.get_plugin() is not None else BRIDGE_STANDALONE
+        return self.mode
+
+    def is_standalone(self) -> bool:
+        return self.effective_mode() == BRIDGE_STANDALONE
 
     # -------------------------------------------------- 插件实例发现
 
     def get_plugin(self, force: bool = False) -> Any:
+        if self.mode == BRIDGE_STANDALONE and not force:
+            # 独立模式：连"找一下"都不做，保证不触发它的任何代码路径
+            return None
         if (
             not force
             and self._plugin is not None
@@ -113,7 +166,14 @@ class CompanionBridge:
         return plugin
 
     def available(self) -> bool:
-        return self.get_plugin() is not None
+        """插件是否可用。
+
+        standalone（含 auto 自动降级）：恒为真（本插件自带视觉/文本/生图链路）；
+        companion：陪伴插件未启用时为假，此时才回「桥不可用」提示。
+        """
+        if self.mode == BRIDGE_STANDALONE:
+            return True
+        return self.get_plugin() is not None or self.effective_mode() == BRIDGE_STANDALONE
 
     # -------------------------------------------------- 身份
 
@@ -258,7 +318,48 @@ class CompanionBridge:
                 f"bot_treat: 发现 {len(raw)} 个图片源但均无法本地化，"
                 f"首个={_clip(raw[0], 120)}"
             )
-        return paths[:3]
+        result = paths[:3]
+        if result and self.is_standalone():
+            # 独立模式没有陪伴插件的入站图管道，自己留一份，
+            # 好让「照片与投喂分两条消息发」的回看 / 等图仍然能用。
+            self.save_inbound_images(user_id, result)
+        return result
+
+    def _own_inbound_dir(self) -> str:
+        return os.path.join(self._cache_dir(), OWN_INBOUND_SUBDIR)
+
+    def save_inbound_images(self, user_id: str, paths: list) -> None:
+        """独立模式：把本轮图片复制一份到自己的入站目录（按用户分目录，1 天后自动清）。
+
+        为什么需要：0.4.0 依赖陪伴插件的 `private_inbound_images/<uid>/` 做
+        「回看最近收到的图」（照片与文字分两条消息发的常见姿势）。独立模式下没有它，
+        必须在本地补一份，否则 `image_lookback_sec` / `feed_wait_photo_sec` 全失效。
+        只写该用户自己的子目录，不跨用户（与陪伴插件同款隐私口径）。
+        """
+        name = re.sub(r"[^0-9A-Za-z_.-]+", "_", str(user_id or ""))
+        if not name:
+            return
+        target_dir = os.path.join(self._own_inbound_dir(), name)
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            root = os.path.realpath(target_dir)
+        except Exception:
+            return
+        self._prune_staging_dir(target_dir, max_age_sec=86400.0, keep=20)
+        stamp = int(time.time() * 1000)
+        for idx, path in enumerate(paths or []):
+            try:
+                source = str(path or "")
+                if not os.path.isfile(source):
+                    continue
+                if os.path.realpath(source).startswith(root + os.sep):
+                    continue  # 已经在自己的入站目录里，不用再拷一层
+                suffix = os.path.splitext(source)[1].lower() or ".jpg"
+                if suffix not in _IMAGE_EXT:
+                    suffix = ".jpg"
+                shutil.copy2(source, os.path.join(target_dir, f"{stamp}_{idx}{suffix}"))
+            except Exception:
+                continue
 
     async def _download(self, url: str) -> str:
         """兜底下载（aiohttp 优先，失败退线程 urllib）。
@@ -316,7 +417,13 @@ class CompanionBridge:
             return ""
 
     def _reference_staging_dir(self) -> str:
-        """参考图暂存目录：优先落在陪伴插件数据目录内（否则会被它的白名单拒绝）。"""
+        """参考图暂存目录。
+
+        companion 模式：必须落在陪伴插件数据目录内（否则会被它的路径白名单拒绝）。
+        standalone 模式：落在**本插件自己**的 data_dir 下，且不打无意义的 warning。
+        """
+        if self.is_standalone():
+            return os.path.join(self._cache_dir(), OWN_REF_SUBDIR)
         plugin = self.get_plugin()
         data_dir = str(getattr(plugin, "data_dir", "") or "") if plugin else ""
         if data_dir and os.path.isdir(data_dir):
@@ -648,6 +755,11 @@ class CompanionBridge:
         `api_override_sec` 秒（默认 15s），随后自动还原——把对她其它生图的影响窗口压到最小。
         """
         plugin = self.get_plugin()
+        if self.is_standalone():
+            # 独立模式走 standalone_image，不该到这里；真到了就是内部路由 bug，
+            # 明说而不是静默降级成"画不出来"。
+            logger.warning("bot_treat: 独立模式误调陪伴插件生图入口（应走 standalone_image）")
+            return {"status": "standalone_mode", "generated": False, "sent": False}
         if plugin is None:
             return {"status": "bridge_unavailable", "generated": False, "sent": False}
 
@@ -757,6 +869,10 @@ class CompanionBridge:
     # -------------------------------------------------- 人设
 
     def persona_excerpt(self, limit: int = 900) -> str:
+        if self.is_standalone():
+            # 独立模式：用本插件配置里自己填的人设；留空则返回空串，
+            # 由 prompts.build_decision_system 兜到 PERSONA_FALLBACK（中性兜底）。
+            return _clip(self.persona_text, limit)
         plugin = self.get_plugin()
         if plugin is None:
             return ""
@@ -793,6 +909,11 @@ class CompanionBridge:
 
         只在该用户自己的目录里找（不跨用户扫，避免隐私串号）。
         """
+        if self.is_standalone():
+            # 独立模式：扫自己落盘的入站图（见 save_inbound_images）
+            return self._scan_recent_images(
+                self._own_inbound_dir(), list(user_ids), max_age_sec, limit
+            )
         plugin = self.get_plugin()
         data_dir = str(getattr(plugin, "data_dir", "") or "") if plugin else ""
         if not data_dir:
@@ -859,11 +980,30 @@ class CompanionBridge:
         `preferred`（插件配置里用户自己指定的图，可为本地路径或 URL）优先；
         它同样必须落在陪伴插件 data_dir 内，否则会被其路径白名单拒绝 → 需要时复制进去。
         """
+        want = str(preferred or "").strip()
+        if self.is_standalone():
+            # 独立模式：只用配置里指定的图，不碰陪伴插件的任何解析器；
+            # 也不需要拷进它的 data_dir（没有那套路径白名单校验）。
+            if want:
+                local = await self._local_reference(want)
+                if local:
+                    logger.info(f"bot_treat: [独立模式] 人设参考图 → {_clip(local, 110)}")
+                    return local
+                logger.warning(
+                    "bot_treat: [独立模式] 人设参考图不可用（既不是可读的本地文件，"
+                    f"也不是可下载的 URL）：{_clip(want, 120)}"
+                )
+            else:
+                logger.warning(
+                    "bot_treat: [独立模式] 未配置 persona_reference_image_path，"
+                    "本次生成没有人物身份参考图（脸不保证与人设一致）"
+                )
+            return ""
+
         plugin = self.get_plugin()
         if plugin is None:
             return ""
 
-        want = str(preferred or "").strip()
         if want:
             local = await self._local_reference(want)
             if local:

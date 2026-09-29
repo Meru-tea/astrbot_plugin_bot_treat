@@ -147,6 +147,8 @@ FALLBACK_TEXTS = {
     "blocked_small": "这种小贴纸才不算食物呢，哼。",
     "blocked_keyword": "这个不行啦，换一个给我嘛。",
     "gen_failed": "诶…刚才那口没吃成，等我一下下嘛。",
+    "no_api_config": "唔…我这边的出图接口还没配好呢，先让主人去设置里补齐吧。",
+    "invalid_reference": "这张照片我有点用不上呢…换一张清楚点的试试？",
     "quota_exhausted": "今天已经喂我这么多啦，再吃下去核心要过热了…",
     "unauthorized": "这个场合我不太方便吃东西呢。",
     "cooldown": "刚吃完呢，等我缓一缓嘛。",

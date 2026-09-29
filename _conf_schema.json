@@ -1,4 +1,14 @@
 {
+  "bridge_mode": {
+    "description": "运行模式：auto=有陪伴插件走它、没有就独立运行；companion=只用陪伴插件；standalone=完全独立",
+    "type": "string",
+    "options": [
+      "auto",
+      "companion",
+      "standalone"
+    ],
+    "default": "auto"
+  },
   "enable_feed": {
     "description": "投喂功能总开关",
     "type": "bool",
@@ -49,6 +59,11 @@
     "type": "bool",
     "default": true
   },
+  "persona_text": {
+    "description": "【独立模式】角色人设文本，留空用内置中性兜底；companion 模式忽略此项",
+    "type": "string",
+    "default": ""
+  },
   "persona_reference_image_path": {
     "description": "人物身份参考图的本地绝对路径或图片 URL（留空=自动使用陪伴插件配置的人物参考图）",
     "type": "string",
@@ -93,6 +108,11 @@
     "description": "上面自定义接口的出图尺寸，如 1024x1024",
     "type": "string",
     "default": ""
+  },
+  "standalone_photo_size": {
+    "description": "【独立模式】出图尺寸；photo_api_size 留空时用这个",
+    "type": "string",
+    "default": "1024x1024"
   },
   "photo_api_override_sec": {
     "description": "自定义接口的覆盖保持秒数",
