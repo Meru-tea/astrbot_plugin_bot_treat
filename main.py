@@ -61,7 +61,24 @@ from .prompts import FALLBACK_TEXTS, build_eat_prompt
 from . import standalone_image
 
 PLUGIN_NAME = "astrbot_plugin_bot_treat"
-VERSION = "0.5.0"
+VERSION = "0.5.2"
+
+# 入口 handler 的优先级。**必须是正数**，否则拿不到「照片事件」。
+#
+# 为什么（2026-09-29 实测，代价是白跑一轮用户实测）：
+#   陪伴插件的私聊管线 `on_private_message`（private_companion/main.py:21111）是
+#   `EventMessageType.PRIVATE_MESSAGE` 且**未设 priority（=0）**；同优先级下按注册顺序排，
+#   它插件加载更早 ⇒ 排在我们前面。它会把「私聊单图（无文字）」消息接管并 `stop_event()`，
+#   而框架 `star_request.process()` 的 handler 循环每步都 `if event.is_stopped(): break`
+#   ⇒ **我们的入口连被调用都不会**。表现极具误导性：日志里一张图的消息一条记录都没有，
+#   看起来像"用户没发图"，实际是"我们根本没收到"。
+#
+# 取值 100 的取舍（不是随手取的）：
+#   高于 0 —— 抢在它的私聊管线之前，这样才拿得到照片事件、`photo_hold_sec` 才有意义；
+#   低于它的 9500/10000/11000（戳一戳 / 撤回增强与入站活动记账 / TTS 流式预判）
+#   与 220000/221000（私聊档案预处理、现实身份登记）—— 这些照常先跑，
+#   不改变陪伴插件的既有行为，也不影响它记录入站活动。
+ENTRY_PRIORITY = 100
 
 # 「本轮出站结果是本插件自己的」标记。投喂窗口内靠它区分「我们的进食图」与
 # 「陪伴插件对照片的迟到点评/表情包」——只放行自己的，其余丢弃。
@@ -234,6 +251,8 @@ class BotTreatPlugin(Star):
         self._held_photos: dict[str, tuple[list[str], float]] = {}
         # 闸门被调用的计数（自证用：只记前 30 次，区分"没被调用"与"调用了但早退"）
         self._gate_calls: int = 0
+        # 入口被调用的计数（自证用：只记前 60 条私聊事件，用于确认照片事件到底有没有到达本插件）
+        self._entry_calls: int = 0
         self._states: dict = load_states(state_path(self._data_dir))
 
     # -------------------------------------------------- 生命周期
@@ -262,9 +281,9 @@ class BotTreatPlugin(Star):
                     f"bot_treat: [独立模式] 生图接口未配置完整，缺 {'/'.join(missing)} ——"
                     f"能识别与决策，但出图会失败（回执 no_api_config，不消耗额度）"
                 )
-            if not str(cfg.persona_reference_image_path or "").strip():
+            if not cfg.persona_reference_image:
                 logger.warning(
-                    "bot_treat: [独立模式] 未配置 persona_reference_image_path，"
+                    "bot_treat: [独立模式] 面板里没上传「人物身份参考图」，"
                     "生成的人物不会与人设保持同一张脸"
                 )
             if not cfg.persona_text:
@@ -559,7 +578,7 @@ class BotTreatPlugin(Star):
 
     # -------------------------------------------------- 统一入口
 
-    @filter.event_message_type(EventMessageType.ALL)
+    @filter.event_message_type(EventMessageType.ALL, priority=ENTRY_PRIORITY)
     async def feed_entry(self, event: AstrMessageEvent) -> AsyncGenerator:
         try:
             async for result in self._handle(event):
@@ -579,6 +598,28 @@ class BotTreatPlugin(Star):
         text = str(getattr(event, "message_str", "") or "").strip()
         # 去掉可能残留的命令前缀（部分适配器不剥离）
         text = text.lstrip("/!！").strip()
+
+        # 诊断：私聊事件全量记账（低频，只记前若干条）。
+        # 为什么必须有它：照片与「投喂」分两条消息发时，失败可能是"我们**根本没收到**
+        # 那条照片事件"（被排在前面的插件 stop 掉了），此时后续任何分支都不会打日志，
+        # 光看「触发命中 / 无可用图片」只会误判成"用户没发图"。
+        if _is_private_event(event):
+            self._entry_calls += 1
+            if self._entry_calls <= 60:
+                try:
+                    stopped = bool(event.is_stopped())
+                except Exception:
+                    stopped = "?"
+                try:
+                    has_result = event.get_result() is not None
+                except Exception:
+                    has_result = "?"
+                logger.info(
+                    f"bot_treat: 私聊事件 #{self._entry_calls} 文本={_clip(text, 24)!r} "
+                    f"含图={_has_image_hint(event)} 组件={_component_names(event)} "
+                    f"已停止={stopped} 已有结果={has_result}"
+                )
+
         if not START_RE.match(text):
             if _is_private_event(event) and _has_image_hint(event):
                 logger.info(
@@ -758,9 +799,16 @@ class BotTreatPlugin(Star):
         # 3) 食物识别
         food = await recognize_food(self.bridge, paths, cfg)
         if food is None:
+            # 这一步以前是静默 return 的，实测白白多花一轮排查（看不出是"没认出"还是"没收到图"）
+            logger.warning(
+                f"bot_treat: 食物识别失败（视觉模型没返回可解析的 JSON）user={user_id}"
+            )
             yield event.plain_result(FALLBACK_TEXTS["unreadable"])
             return
         if food.confidence < 0.3 and food.name == "看不清":
+            logger.info(
+                f"bot_treat: 识别结果不可信(conf={food.confidence:.2f}) user={user_id} → 按看不清处理"
+            )
             yield event.plain_result(FALLBACK_TEXTS["unreadable"])
             return
         if not food.edible:
@@ -820,7 +868,7 @@ class BotTreatPlugin(Star):
         with_food_ref = False
         if cfg.use_food_as_ref:
             persona_path = await self.bridge.persona_reference_path(
-                cfg.persona_reference_image_path
+                cfg.persona_reference_image
             )
             if persona_path:
                 reference_paths = [persona_path, *paths][:2]

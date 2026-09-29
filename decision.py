@@ -80,6 +80,19 @@ def _as_list(value: Any) -> list:
     return []
 
 
+def _as_files(value: Any) -> list:
+    """`type: "file"` 配置值 → 路径列表（值是**相对本插件 data_dir** 的路径，如 files/<键名>/x.png）。
+
+    兼容三种形态：list（面板上传的正常形态）、str（手填路径，或早期版本遗留）、None。
+    """
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v or "").strip()]
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    return []
+
+
 @dataclass
 class TreatConfig:
     # 运行模式：auto / companion / standalone（见模块顶部说明）
@@ -96,8 +109,8 @@ class TreatConfig:
     # （第1张=角色人设身份图保脸，第2张=用户食物照片仅作 scene 参考）。
     # 详见 prompts.REFERENCE_ROLE_SUFFIX 与 README §4.1。
     use_food_as_ref: bool = True
-    # 人物身份参考图（本地绝对路径或 URL）；留空 = 自动用陪伴插件配置的人物参考图
-    persona_reference_image_path: str = ""
+    # 人物身份参考图（WebUI 的「管理文件」上传，存的是相对本插件 data_dir 的路径列表）
+    persona_reference_image: list = field(default_factory=list)
     # 【独立模式】角色人设文本；留空 = 用 prompts.PERSONA_FALLBACK
     persona_text: str = ""
     # 留空 = 用 AstrBot 默认 provider / 陪伴插件配置的视觉模型（发布版默认留空）
@@ -159,7 +172,11 @@ class TreatConfig:
             satiety_threshold=max(1, _as_int(_get("satiety_threshold", 3), 3)),
             gen_kind=kind,
             use_food_as_ref=_as_bool(_get("use_food_as_ref", True), True),
-            persona_reference_image_path=_as_text(_get("persona_reference_image_path", "")),
+            persona_reference_image=(
+                _as_files(_get("persona_reference_image", []))
+                # 兼容 0.5.1 及以前的字符串键（留着不碍事，面板已不再显示它）
+                or _as_files(_get("persona_reference_image_path", ""))
+            ),
             persona_text=_as_text(_get("persona_text", "")),
             vision_provider_id=str(_get("vision_provider_id", "") or "").strip(),
             vision_timeout_sec=max(5, _as_int(_get("vision_timeout_sec", 30), 30)),

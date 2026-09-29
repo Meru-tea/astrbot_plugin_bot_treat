@@ -1,6 +1,6 @@
 {
   "bridge_mode": {
-    "description": "运行模式：auto=有陪伴插件走它、没有就独立运行；companion=只用陪伴插件；standalone=完全独立",
+    "description": "运行模式：自动 / 依赖陪伴插件 / 独立运行",
     "type": "string",
     "options": [
       "auto",
@@ -45,7 +45,7 @@
     "default": 3
   },
   "gen_kind": {
-    "description": "进食照片的生图类型：selfie 保脸 / edit 以食物图改图 / text2img 纯场景",
+    "description": "生图类型：selfie 保脸 / edit 改图 / text2img 纯场景",
     "type": "string",
     "options": [
       "selfie",
@@ -59,13 +59,20 @@
     "type": "bool",
     "default": true
   },
-  "persona_text": {
-    "description": "【独立模式】角色人设文本，留空用内置中性兜底；companion 模式忽略此项",
-    "type": "string",
-    "default": ""
+  "persona_reference_image": {
+    "type": "file",
+    "description": "人物身份参考图（用于保脸）",
+    "default": [],
+    "file_types": [
+      "png",
+      "jpg",
+      "jpeg",
+      "bmp",
+      "webp"
+    ]
   },
-  "persona_reference_image_path": {
-    "description": "人物身份参考图的本地绝对路径或图片 URL（留空=自动使用陪伴插件配置的人物参考图）",
+  "persona_text": {
+    "description": "独立模式的人设文本，留空用内置兜底",
     "type": "string",
     "default": ""
   },
@@ -90,32 +97,32 @@
     "default": 8
   },
   "photo_api_base_url": {
-    "description": "仅投喂使用的生图接口地址，留空=沿用陪伴插件配置",
+    "description": "生图接口地址，留空=沿用陪伴插件",
     "type": "string",
     "default": ""
   },
   "photo_api_key": {
-    "description": "上面自定义接口的密钥",
+    "description": "生图接口密钥",
     "type": "string",
     "default": ""
   },
   "photo_api_model": {
-    "description": "上面自定义接口的模型名，如 gpt-image-2.5",
+    "description": "生图模型名，如 gpt-image-2.5",
     "type": "string",
     "default": ""
   },
   "photo_api_size": {
-    "description": "上面自定义接口的出图尺寸，如 1024x1024",
+    "description": "出图尺寸，留空=不改陪伴插件的",
     "type": "string",
     "default": ""
   },
   "standalone_photo_size": {
-    "description": "【独立模式】出图尺寸；photo_api_size 留空时用这个",
+    "description": "独立模式出图尺寸，如 1024x1024",
     "type": "string",
     "default": "1024x1024"
   },
   "photo_api_override_sec": {
-    "description": "自定义接口的覆盖保持秒数",
+    "description": "接口覆盖保持秒数",
     "type": "int",
     "default": 15
   },

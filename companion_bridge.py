@@ -508,6 +508,27 @@ class CompanionBridge:
 
     # -------------------------------------------------- 视觉识别
 
+    def _image_caption_provider_id(self) -> str:
+        """AstrBot **全局配置**里指定的「图片理解」provider id（可为空）。
+
+        为什么独立模式需要它（2026-09-29 实测踩坑）：AstrBot 的「默认对话模型」
+        （`provider_settings.default_provider_id`）**很可能是纯文本模型**，拿它看图会一直
+        失败到超时（本项目实测：两次 payload 各等 30s，73 秒后才吐一句「看不清」）。
+        而 AstrBot 另有 `default_image_caption_provider_id` 专管图片理解，
+        这才是独立模式该用的兜底。
+        """
+        try:
+            cfg = self.context.get_config()
+        except Exception:
+            return ""
+        try:
+            settings = cfg.get("provider_settings") if hasattr(cfg, "get") else None
+        except Exception:
+            settings = None
+        if not isinstance(settings, dict):
+            return ""
+        return str(settings.get("default_image_caption_provider_id") or "").strip()
+
     def _vision_providers(self, preferred_id: str = "") -> Iterable[Any]:
         seen: set[int] = set()
         candidates: list[str] = []
@@ -519,6 +540,11 @@ class CompanionBridge:
             value = getattr(plugin, attr, None) if plugin else None
             if value:
                 candidates.append(str(value))
+        # AstrBot 的「图片理解」provider 排在陪伴插件的视觉 provider 之后、
+        # 默认对话模型之前 —— 独立模式就靠它（companion 模式通常用不到）。
+        caption_id = self._image_caption_provider_id()
+        if caption_id:
+            candidates.append(caption_id)
         getter = getattr(self.context, "get_provider_by_id", None)
         for pid in candidates:
             try:
@@ -536,6 +562,16 @@ class CompanionBridge:
             seen.add(id(provider))
             yield provider
 
+    @staticmethod
+    def _provider_label(provider) -> str:
+        """provider 的可读标识（日志用），取不到就退类名。"""
+        cfg = getattr(provider, "provider_config", None)
+        if isinstance(cfg, dict):
+            label = str(cfg.get("id") or cfg.get("model") or "").strip()
+            if label:
+                return label
+        return provider.__class__.__name__
+
     async def vision(
         self,
         prompt: str,
@@ -550,11 +586,14 @@ class CompanionBridge:
             return None
         payloads = self._image_payloads(image_urls)
         last_error = ""
+        tried: list[str] = []
         for provider in self._vision_providers(preferred_provider_id):
             call = getattr(provider, "text_chat", None)
             if not callable(call):
                 continue
+            label = self._provider_label(provider)
             for images in payloads:
+                tried.append(label)
                 try:
                     import asyncio
 
@@ -563,16 +602,29 @@ class CompanionBridge:
                         timeout=max(5.0, float(timeout)),
                     )
                 except Exception as e:
-                    last_error = str(e)
+                    # 必须带异常类型：TimeoutError 的 str() 是空的，只打 message 会得到空白行
+                    last_error = f"{type(e).__name__}: {e or '(无消息)'}"
+                    logger.warning(
+                        f"bot_treat: 视觉识别 provider={label} 失败({last_error[:120]})"
+                    )
                     continue
                 text = str(getattr(resp, "completion_text", "") or "").strip()
                 if not text:
                     chain = getattr(resp, "result_chain", None)
                     text = str(chain or "").strip()
                 if text:
+                    logger.info(f"bot_treat: 视觉识别 provider={label} 成功（{len(text)} 字）")
                     return text
-        if last_error:
-            logger.warning(f"bot_treat: 视觉识别全部 provider 失败: {_clip(last_error, 200)}")
+        if tried:
+            logger.warning(
+                f"bot_treat: 视觉识别全部失败（试过 {len(tried)} 次："
+                f"{_clip('、'.join(tried), 180)}）最后错误={_clip(last_error, 160)}"
+            )
+        else:
+            logger.warning(
+                "bot_treat: 视觉识别没有可用 provider —— 既没配 vision_provider_id，"
+                "也取不到 AstrBot 的默认/图片理解 provider（独立模式下请至少配一个能看图的模型）"
+            )
         return None
 
     @staticmethod
@@ -965,8 +1017,11 @@ class CompanionBridge:
 
     # -------------------------------------------------- 人设参考图
 
-    async def persona_reference_path(self, preferred: str = "") -> str:
+    async def persona_reference_path(self, preferred: Any = "") -> str:
         """解析人物身份参考图的**本地绝对路径**（多路兜底，取不到返回空串）。
+
+        `preferred` 支持 str 或 list —— 面板的 `type: "file"` 配置给的是**列表**
+        （存的是相对本插件 data_dir 的路径，见 `_resolve_own_relative()`），取第一条。
 
         为什么需要它：陪伴插件在「本轮带了显式参考图」时**不会**再把 persona 候选
         自动加进参考图计划（`proactive_message.py` 约 16263 行那个分支要求
@@ -977,25 +1032,26 @@ class CompanionBridge:
         会对每个参考图做 `os.path.isabs` 校验，传 URL 会直接抛 `reference_path_invalid`。
         因此拿到 URL 时先下载成本地文件。
 
-        `preferred`（插件配置里用户自己指定的图，可为本地路径或 URL）优先；
-        它同样必须落在陪伴插件 data_dir 内，否则会被其路径白名单拒绝 → 需要时复制进去。
+        `preferred`（插件配置里用户自己指定的图）优先；在 companion 模式下
+        它必须落在陪伴插件 data_dir 内，否则会被其路径白名单拒绝 → 需要时复制进去。
         """
-        want = str(preferred or "").strip()
+        raw = list(preferred) if isinstance(preferred, (list, tuple)) else [preferred]
+        wants = [str(x).strip() for x in raw if str(x or "").strip()]
         if self.is_standalone():
             # 独立模式：只用配置里指定的图，不碰陪伴插件的任何解析器；
             # 也不需要拷进它的 data_dir（没有那套路径白名单校验）。
-            if want:
-                local = await self._local_reference(want)
+            for candidate in wants:  # 面板可能存多张，逐张试到第一张能用的
+                local = await self._local_reference(candidate)
                 if local:
                     logger.info(f"bot_treat: [独立模式] 人设参考图 → {_clip(local, 110)}")
                     return local
                 logger.warning(
-                    "bot_treat: [独立模式] 人设参考图不可用（既不是可读的本地文件，"
-                    f"也不是可下载的 URL）：{_clip(want, 120)}"
+                    "bot_treat: [独立模式] 人设参考图不可用（既不是可读的本地文件、"
+                    f"也不是面板上传的相对路径、也不是可下载的 URL）：{_clip(candidate, 120)}"
                 )
-            else:
+            if not wants:
                 logger.warning(
-                    "bot_treat: [独立模式] 未配置 persona_reference_image_path，"
+                    "bot_treat: [独立模式] 面板里没上传「人物身份参考图」，"
                     "本次生成没有人物身份参考图（脸不保证与人设一致）"
                 )
             return ""
@@ -1004,9 +1060,15 @@ class CompanionBridge:
         if plugin is None:
             return ""
 
-        if want:
-            local = await self._local_reference(want)
-            if local:
+        if wants:
+            for candidate in wants:  # 面板可能存多张，逐张试到第一张能用的
+                local = await self._local_reference(candidate)
+                if not local:
+                    logger.warning(
+                        "bot_treat: 配置的人设参考图不可用（既不是可读的本地文件、"
+                        f"也不是面板上传的相对路径、也不是可下载的 URL）：{_clip(candidate, 120)}"
+                    )
+                    continue
                 staged = self._ensure_inside_companion_data_dir(plugin, local, stem="persona")
                 if staged:
                     logger.info(f"bot_treat: 人设参考图使用配置指定的图 → {_clip(staged, 110)}")
@@ -1014,11 +1076,6 @@ class CompanionBridge:
                 logger.warning(
                     "bot_treat: 配置的人设参考图无法放入陪伴插件数据目录，"
                     "已回退为自动解析（该图不会被使用）"
-                )
-            else:
-                logger.warning(
-                    f"bot_treat: 配置的人设参考图不可用（既不是可读的本地文件也不是可下载的 URL）："
-                    f"{_clip(want, 120)}"
                 )
 
         candidates: list[str] = []
@@ -1077,8 +1134,25 @@ class CompanionBridge:
         text = str(value or "").strip()
         return bool(text) and os.path.isabs(text) and os.path.isfile(text)
 
+    def _resolve_own_relative(self, value: str) -> str:
+        """把 `type: "file"` 配置里的**相对路径**解析成本插件 data_dir 下的绝对路径。
+
+        面板上传的存储格式是 `files/<配置键>/<文件名>`，实际落在
+        `<本插件 data_dir>/files/<配置键>/<文件名>`（2026-09-29 实测 payqr 同款）。
+        """
+        text = str(value or "").strip()
+        if not text or os.path.isabs(text):
+            return ""
+        if text.lower().startswith(("http://", "https://", "data:", "file://")):
+            return ""
+        try:
+            candidate = os.path.abspath(os.path.join(self._cache_dir(), text))
+        except Exception:
+            return ""
+        return candidate if self._is_local_file(candidate) else ""
+
     async def _local_reference(self, value: str) -> str:
-        """把参考图统一成本地绝对路径：本地文件直接用，URL 下载后再用。"""
+        """把参考图统一成本地绝对路径：本地文件直接用，面板上传的相对路径按 data_dir 解析，URL 下载后再用。"""
         text = str(value or "").strip()
         if not text:
             return ""
@@ -1086,6 +1160,9 @@ class CompanionBridge:
             text = _file_uri_to_path(text)
         if self._is_local_file(text):
             return os.path.abspath(text)
+        own = self._resolve_own_relative(text)
+        if own:
+            return own
         if text.lower().startswith(("http://", "https://")):
             saved = await self._download(text)
             if saved and self._is_local_file(saved):
