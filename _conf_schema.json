@@ -187,6 +187,23 @@
     "type": "bool",
     "default": true
   },
+  "enable_stats": {
+    "description": "投喂统计与排行",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后可用「投喂统计」（看自己的投喂记录）与「投喂排行」（看本群排行）。这两个词不带图也生效。关掉后它们完全不接管消息。"
+  },
+  "stats_rank_size": {
+    "description": "排行显示人数",
+    "type": "int",
+    "default": 5
+  },
+  "stats_keep_days": {
+    "description": "按天明细保留天数",
+    "type": "int",
+    "default": 90,
+    "hint": "只影响「按天」的那部分明细。累计次数与最常投喂食物榜永不清理。"
+  },
   "dry_run": {
     "description": "演练模式：照常决策但不出图，只回一条调试文本",
     "type": "bool",

@@ -144,6 +144,10 @@ class TreatConfig:
     feed_watch_sec: int = 150
     extra_block_keywords: list = field(default_factory=list)
     enable_memory_writeback: bool = True
+    # 统计与排行（账本在 feed_stats.json，见 stats.py）
+    enable_stats: bool = True
+    stats_rank_size: int = 5
+    stats_keep_days: int = 90
     dry_run: bool = False
 
     @classmethod
@@ -203,6 +207,9 @@ class TreatConfig:
             feed_watch_sec=max(0, _as_int(_get("feed_watch_sec", 150), 150)),
             extra_block_keywords=[str(k) for k in _as_list(_get("extra_block_keywords", []))],
             enable_memory_writeback=_as_bool(_get("enable_memory_writeback", True), True),
+            enable_stats=_as_bool(_get("enable_stats", True), True),
+            stats_rank_size=max(1, _as_int(_get("stats_rank_size", 5), 5)),
+            stats_keep_days=max(1, _as_int(_get("stats_keep_days", 90), 90)),
             dry_run=_as_bool(_get("dry_run", False), False),
         )
 

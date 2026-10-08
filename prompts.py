@@ -5,6 +5,7 @@
   2. build_decision_system / build_decision_user —— 吃不吃决策（注入角色人设 + 状态）
   3. build_eat_prompt —— 进食画面生图 prompt
   4. PERSONA_FALLBACK / FALLBACK_TEXTS —— 人设兜底与降级文案
+  5. STATS_TEXTS —— 「投喂统计 / 投喂排行」的输出模板
 
 注意：所有模板里的字面 JSON 花括号都写成 {{ }}，保证 str.format 只处理占位符。
 """
@@ -154,4 +155,23 @@ FALLBACK_TEXTS = {
     "cooldown": "刚吃完呢，等我缓一缓嘛。",
     "satiety": "吃不下了啦，我可是高性能的，不是垃圾桶！",
     "decide_failed_eat": "唔…那就勉强吃一口吧。",
+}
+
+# ---------------------------------------------------------------- 5. 统计与排行文案
+#
+# 供 stats.py 使用。**占位符必须与 stats.format_* 的 .format(...) 实参一一对应**，
+# 少一个会 KeyError（自检里对每条模板都做了一次 format 演练，就是为了挡这个）。
+
+STATS_TEXTS = {
+    "head_self": "【投喂统计】",
+    "today": "今天：投喂 {total} 次｜吃下 {accepted} 次｜拒绝 {refused} 次｜没吃成 {failed} 次｜拦下 {blocked} 次",
+    "today_empty": "今天还没喂我吃过东西呢。",
+    "total": "累计：投喂 {total} 次 · 吃下 {accepted} 次 · 成功率 {rate}%",
+    "in_group": "本群：投喂 {total} 次 · 吃下 {accepted} 次",
+    "foods": "最常喂我的：{items}",
+    "empty_self": "还没有投喂记录呢～发张食物照片再说一声「投喂」嘛。",
+    "head_rank": "【本群投喂排行 · 累计】",
+    "rank_row": "{idx}. {name} — 投喂 {total} 次 · 吃下 {accepted} 次",
+    "empty_group": "这个群里还没有人喂过我呢。",
+    "need_group": "「投喂排行」要在群里看哦～",
 }

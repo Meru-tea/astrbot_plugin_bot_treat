@@ -59,9 +59,10 @@ from .decision import (
 )
 from .prompts import FALLBACK_TEXTS, build_eat_prompt
 from . import standalone_image
+from . import stats as stat_lib
 
 PLUGIN_NAME = "astrbot_plugin_bot_treat"
-VERSION = "0.5.4"
+VERSION = "0.6.0"
 
 # 入口 handler 的优先级。**必须是正数**，否则拿不到「照片事件」。
 #
@@ -161,6 +162,14 @@ START_RE = re.compile(r"^\s*(投喂|喂食|喂饭|给你吃|请你吃|尝尝这�
 DEDUP_TTL_SEC = 90.0
 STATUS_OK = {"ok", "success", "succeeded"}
 
+# 统计 / 排行命令词（去空白后按前缀匹配）。
+#
+# ⚠️ 这些词**会命中上面的 START_RE**（`投喂统计` 以「投喂」开头），所以命令判定
+# 必须排在 START_RE 之前 —— 否则会被当成「命中触发词但没带图」的投喂，
+# 回一句「投喂要带图哦」，功能等于没做。见 _handle 里的调用点注释。
+STATS_RANK_COMMANDS = ("投喂排行榜", "投喂排行", "喂食排行", "投喂榜", "喂食榜")
+STATS_SELF_COMMANDS = ("投喂统计", "喂食统计", "投喂数据", "投喂记录", "喂食记录")
+
 
 def _raw_text(event: AstrMessageEvent) -> str:
     """尽力取平台原始文本（含唤醒前缀）；取不到返回空串。
@@ -175,6 +184,21 @@ def _raw_text(event: AstrMessageEvent) -> str:
             value = raw.get(key)
             if isinstance(value, str) and value.strip():
                 return value
+    return ""
+
+
+def _sender_name(event: AstrMessageEvent) -> str:
+    """尽力取发送者昵称（供统计排行的显示名）；取不到返回空串，由账本退 id 后 6 位。"""
+    for attr in ("get_sender_name", "get_sender_nickname"):
+        fn = getattr(event, attr, None)
+        if not callable(fn):
+            continue
+        try:
+            value = str(fn() or "").strip()
+        except Exception:
+            continue
+        if value:
+            return value[:32]
     return ""
 
 
@@ -257,6 +281,10 @@ class BotTreatPlugin(Star):
         # 入口被调用的计数（自证用：只记前 60 条私聊事件，用于确认照片事件到底有没有到达本插件）
         self._entry_calls: int = 0
         self._states: dict = load_states(state_path(self._data_dir))
+        # 统计账本（与 _states 分开存：feed_state 是"当日状态"、跨天清零，
+        # feed_stats 是"跨天累计"，两者语义相反，见 stats.py 模块说明）
+        self._stats_data: dict = stat_lib.load_stats(stat_lib.stats_path(self._data_dir))
+        self._stats_dirty: bool = False
 
     # -------------------------------------------------- 生命周期
 
@@ -358,6 +386,7 @@ class BotTreatPlugin(Star):
 
     async def terminate(self):
         save_states(state_path(self._data_dir), self._states)
+        self._persist_stats(force=True)
         self._feed_windows.clear()
         self._held_photos.clear()
         for evt in list(self._photo_holds.values()):
@@ -479,6 +508,89 @@ class BotTreatPlugin(Star):
 
     def _persist(self) -> None:
         save_states(state_path(self._data_dir), self._states)
+        self._persist_stats()
+
+    def _persist_stats(self, force: bool = False) -> None:
+        """落盘统计账本。
+
+        `force` 用于卸载时：若只认 dirty 标记，账本可能停在最后一次 `_persist` 的状态，
+        卸载后新增的那几条就丢了（`terminate` 会调 force=True）。
+        """
+        if not force and not self._stats_dirty:
+            return
+        try:
+            stat_lib.save_stats(stat_lib.stats_path(self._data_dir), self._stats_data)
+            self._stats_dirty = False
+        except Exception as e:
+            logger.debug(f"bot_treat: 统计落盘失败: {_clip(e, 160)}")
+
+    def _note_stat(
+        self,
+        uid: str,
+        kind: str,
+        *,
+        group_id: str = "",
+        name: str = "",
+        food: str = "",
+    ) -> None:
+        """统计记账的唯一出口。**任何异常都不许影响投喂主流程**，故整体兜底。"""
+        try:
+            stat_lib.note_stat(
+                self._stats_data,
+                uid,
+                kind=kind,
+                group_id=group_id,
+                name=name,
+                food=food,
+            )
+            self._stats_dirty = True
+        except Exception as e:
+            logger.debug(f"bot_treat: 统计记账失败: {_clip(e, 160)}")
+
+    # -------------------------------------------------- 统计 / 排行命令
+
+    def _stats_command(self, event: AstrMessageEvent, cfg: TreatConfig, text: str) -> Optional[str]:
+        """命中统计/排行命令时返回要回复的文本；不是命令则返回 None。
+
+        命令词按**去空白后的前缀**匹配（`投喂统计一下` 也算），所以判定必须早于
+        `START_RE`（「投喂统计」命中 `^投喂`）——调用点见 `_handle` 顶部。
+        """
+        cmd = re.sub(r"\s+", "", str(text or ""))
+        if not cmd:
+            return None
+        is_rank = any(cmd.startswith(token) for token in STATS_RANK_COMMANDS)
+        is_self = any(cmd.startswith(token) for token in STATS_SELF_COMMANDS)
+        if not (is_rank or is_self):
+            return None
+
+        try:
+            group_id = str(event.get_group_id() or "")
+        except Exception:
+            group_id = ""
+        uid = self.bridge.canonical_user_id(event)
+        if not uid or uid == "unknown":
+            try:
+                uid = str(event.get_sender_id() or "") or "unknown"
+            except Exception:
+                uid = "unknown"
+
+        # 按天明细的裁剪放在这里：低频（只有真的用命令时才做），不必新增定时任务
+        try:
+            stat_lib.prune_stats(self._stats_data, cfg.stats_keep_days)
+        except Exception:
+            pass
+
+        logger.info(
+            f"bot_treat: 统计命令 text={_clip(cmd, 24)!r} "
+            f"群={bool(group_id)} 口径={'排行' if is_rank else '自己'} user={uid}"
+        )
+        if is_rank:
+            return stat_lib.format_group_rank(
+                self._stats_data, group_id, limit=cfg.stats_rank_size
+            )
+        return stat_lib.format_user_stats(
+            self._stats_data, uid, group_id=group_id, limit_foods=3
+        )
 
     async def _hold_photo_event(self, event: AstrMessageEvent, cfg: TreatConfig) -> None:
         """照片消息上的「延迟裁决」（handler 层，唯一回复的主机制）。
@@ -604,6 +716,21 @@ class BotTreatPlugin(Star):
         text = str(getattr(event, "message_str", "") or "").strip()
         # 去掉可能残留的命令前缀（部分适配器不剥离）
         text = text.lstrip("/!！").strip()
+
+        # 统计 / 排行命令：**不要求带图**，且必须排在下面的 START_RE 判定之前 ——
+        # 「投喂统计」会命中 `^投喂`，不提前拦就会被当成「命中触发词但没带图」的投喂，
+        # 回一句「投喂要带图哦」，功能等于没做。
+        # 不再另注册 `@filter.command` 的原因见模块顶部：会与这个 ALL 入口重复处理同一条消息。
+        if cfg.enable_stats:
+            stats_reply = self._stats_command(event, cfg, text)
+            if stats_reply is not None:
+                try:
+                    event.stop_event()
+                    event.should_call_llm(True)
+                except Exception:
+                    pass
+                yield event.plain_result(stats_reply)
+                return
 
         # 诊断：私聊事件全量记账（低频，只记前若干条）。
         # 为什么必须有它：照片与「投喂」分两条消息发时，失败可能是"我们**根本没收到**
@@ -759,6 +886,12 @@ class BotTreatPlugin(Star):
 
         user_id = user_id or self.bridge.canonical_user_id(event)
         umo = str(getattr(event, "unified_msg_origin", "") or "")
+        # 统计用上下文（群维度 + 显示名），只取一次，供下面各分支记账复用
+        try:
+            group_id = str(event.get_group_id() or "")
+        except Exception:
+            group_id = ""
+        sender_name = _sender_name(event)
 
         # 1) 取图：优先用「照片挂起」时预先落好的图（那条照片事件已被我们 stop，
         #    她的 handler 不会再落盘，回看目录里也就没有它）；其次本轮消息（**含引用消息里的图**，
@@ -795,10 +928,14 @@ class BotTreatPlugin(Star):
         blocked = precheck_images(paths, cfg.min_image_bytes)
         if blocked:
             logger.info(f"bot_treat: 硬闸拦截({blocked}) user={user_id}")
+            self._note_stat(user_id, stat_lib.KIND_BLOCKED, group_id=group_id, name=sender_name)
+            self._persist_stats()
             yield event.plain_result(FALLBACK_TEXTS.get(blocked, FALLBACK_TEXTS["non_food"]))
             return
         if keyword_blocked(text, cfg.extra_block_keywords):
             logger.info(f"bot_treat: 关键词硬闸拦截 user={user_id}")
+            self._note_stat(user_id, stat_lib.KIND_BLOCKED, group_id=group_id, name=sender_name)
+            self._persist_stats()
             yield event.plain_result(FALLBACK_TEXTS["blocked_keyword"])
             return
 
@@ -809,18 +946,25 @@ class BotTreatPlugin(Star):
             logger.warning(
                 f"bot_treat: 食物识别失败（视觉模型没返回可解析的 JSON）user={user_id}"
             )
+            self._note_stat(user_id, stat_lib.KIND_BLOCKED, group_id=group_id, name=sender_name)
+            self._persist_stats()
             yield event.plain_result(FALLBACK_TEXTS["unreadable"])
             return
         if food.confidence < 0.3 and food.name == "看不清":
             logger.info(
                 f"bot_treat: 识别结果不可信(conf={food.confidence:.2f}) user={user_id} → 按看不清处理"
             )
+            self._note_stat(user_id, stat_lib.KIND_BLOCKED, group_id=group_id, name=sender_name)
+            self._persist_stats()
             yield event.plain_result(FALLBACK_TEXTS["unreadable"])
             return
         if not food.edible:
             today = today_key()
             prune_states(self._states, today)
             note_feed(self._states, user_id, today, accepted=False)
+            # 统计与 feed_state 语义不同，**不合并**：feed_state 把"非食物"计入当日 total，
+            # 统计账本把它记成 blocked（没进决策），这样才能说清"成功率"。
+            self._note_stat(user_id, stat_lib.KIND_BLOCKED, group_id=group_id, name=sender_name)
             self._persist()
             logger.info(f"bot_treat: 非食物/危险物({food.danger_text()}) user={user_id}")
             yield event.plain_result(self._non_food_text(food))
@@ -850,6 +994,7 @@ class BotTreatPlugin(Star):
         # 6) 拒绝分支：只回文本，不生图
         if decision.decision != "eat":
             note_feed(self._states, user_id, today, accepted=False)
+            self._note_stat(user_id, stat_lib.KIND_REFUSED, group_id=group_id, name=sender_name)
             self._persist()
             if cfg.enable_memory_writeback:
                 await self.bridge.memory_writeback(
@@ -948,6 +1093,15 @@ class BotTreatPlugin(Star):
         )
 
         note_feed(self._states, user_id, today, accepted=generated)
+        # 「吃下」只在**真出图成功**时记（food 名也因此只在成功时进偏好榜）；
+        # 决策吃但生图失败记 failed —— 这两者分开才能说清"成功率"是什么失败
+        self._note_stat(
+            user_id,
+            stat_lib.KIND_ACCEPTED if generated else stat_lib.KIND_FAILED,
+            group_id=group_id,
+            name=sender_name,
+            food=food.name if generated else "",
+        )
         self._persist()
 
         if cfg.dry_run:
